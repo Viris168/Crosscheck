@@ -26,7 +26,7 @@ All `apps/web/src/...` paths below are relative to the repo root.
 
 | Path | Owner |
 |---|---|
-| root config, `packages/shared`, `packages/db`, `docker-compose.dev.yml`, `.env.example`, `CLAUDE.md`, `apps/web/src/server/{auth,env,redis}.ts`, `apps/web/src/app/api/{auth,inngest,health}/` | Foundation |
+| root config, `packages/shared`, `packages/db`, `docker-compose.dev.yml`, `.env.example`, `CLAUDE.md`, `apps/web/src/server/{auth,env,redis,logger}.ts`, `apps/web/src/app/api/{auth,inngest,health}/` | Foundation |
 | `packages/github`, `apps/web/src/server/github/`, `apps/web/src/app/api/webhooks/github/` | A — GitHub integration |
 | `apps/web/src/server/jobs/` (Inngest client + functions) | B — Jobs |
 | `packages/providers/` | C — AI providers |
@@ -64,8 +64,10 @@ All `apps/web/src/...` paths below are relative to the repo root.
 ## Commands
 ```bash
 pnpm install
+cp .env.example .env                             # one .env at the repo root (app, Prisma, compose)
 docker compose -f docker-compose.dev.yml up -d   # postgres + redis + inngest dev server
 pnpm db:migrate                                  # prisma migrate dev
+pnpm db:seed                                     # one org/repo/PR + a review in each status
 pnpm dev                                         # next dev (apps/web)
 pnpm turbo test                                  # all tests
 pnpm turbo lint typecheck
@@ -79,7 +81,11 @@ Inngest dev UI: http://localhost:8288
 - Errors that reach users map to an `ErrorCode` from `@app/shared`.
 - Library APIs you are not sure of (Better Auth, Inngest, Next.js, Sign in with ChatGPT, GitHub Actions):
   check current docs; mark assumptions with `// VERIFY:` and list them in the PR description.
-- Logging: `pino`, structured, include `reviewId` / `repoId` where relevant.
+- Logging: `pino` via `logger` from `@/server/logger`, structured, include `reviewId` / `repoId` where relevant.
+- Client components import contracts from `@app/shared/client` (no `node:crypto`); server code uses `@app/shared`.
+- Route handlers: `throw new HttpError(code, msg)` and `catch (e) { return errorResponse(e) }` (both from
+  `@app/shared`); auth with `requireSession(req)` + `requireOrgMember(userId, orgId)` from `@/server/auth`.
+- Send Inngest events with `inngest` from `@/server/jobs` (typed by `eventSchemas` in `@app/shared`).
 - Small commits, conventional messages (`feat(jobs): …`, `fix(web): …`).
 - When done: open a PR from your branch to `main` with a description of what changed, why, how it was
   tested, and anything left undone. Codex will review it.
