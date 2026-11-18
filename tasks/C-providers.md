@@ -28,7 +28,7 @@ export const chatgptOAuth: {
 ```
 
 ### Providers
-| id | runsInWorker | Implementation |
+| id | runsInWorker (runs in our Inngest functions) | Implementation |
 |---|---|---|
 | `platform` | true | Anthropic Messages API with `ANTHROPIC_API_KEY` (fallback: OpenAI with `OPENAI_API_KEY`). Model from repo settings or env default. |
 | `codex_chatgpt` | true | Load `ProviderCredential` for `ctx.orgId` (+ `ctx.userId`), `decrypt()`, refresh if expired (save back encrypted), call OpenAI with the user's token using the plan-usage scope. **Check OpenAI's current "Sign in with ChatGPT" developer docs for exact endpoints, scopes and request format before coding — mark any assumption with `// VERIFY:`.** |
@@ -46,7 +46,9 @@ export const chatgptOAuth: {
 
 ### Error mapping
 HTTP 401/403 → `provider_auth`; 429 / quota → `rate_limited`; timeouts (90s per call) → `timeout`;
-unparseable or schema-invalid JSON → `invalid_output`. Always throw `ProviderError`.
+unparseable or schema-invalid JSON → `invalid_output`. Always throw `ProviderError`. Don't retry inside the
+provider — lane B's Inngest steps own retries (based on `ProviderError.code`).
+The package must not depend on Next.js or Inngest; it is called from inside an Inngest `step.run`.
 
 ## Tests
 - Prompt snapshot tests

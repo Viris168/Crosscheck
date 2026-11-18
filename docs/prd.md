@@ -5,7 +5,7 @@
 | **Status** | Draft v1 |
 | **Owner** | Product owner (you) |
 | **Last updated** | 2026-11-18 |
-| **Related** | `docs/architecture.md`, `docs/essential-architecture.md`, `tasks/` |
+| **Related** | `docs/tech-stack.md` (decided stack), `docs/architecture.md`, `docs/essential-architecture.md`, `tasks/` |
 
 ---
 
@@ -53,9 +53,9 @@ Checks that a change does what it was meant to do — not just that it compiles.
 | Mode | Billed to | Runs where | User provides |
 |---|---|---|---|
 | **Claude (my Claude plan)** | User's Claude Pro/Max/Team/Enterprise | User's GitHub Actions (official Claude Code Action) | `CLAUDE_CODE_OAUTH_TOKEN` + `PLATFORM_INGEST_TOKEN` as **GitHub repo secrets** |
-| **Codex (my ChatGPT plan)** | User's ChatGPT Plus/Pro | Our worker, via Sign in with ChatGPT | Clicks "Sign in with ChatGPT" |
+| **Codex (my ChatGPT plan)** | User's ChatGPT Plus/Pro | Our servers (background jobs), via Sign in with ChatGPT | Clicks "Sign in with ChatGPT" |
 | **Codex (my OpenAI API key)** | User's OpenAI API account | User's GitHub Actions (official Codex Action) | `OPENAI_API_KEY` + `PLATFORM_INGEST_TOKEN` as **GitHub repo secrets** |
-| **Platform default** | Us (included in subscription) | Our worker | Nothing |
+| **Platform default** | Us (included in subscription) | Our servers (background jobs) | Nothing |
 
 **Policy constraint:** Claude consumer-plan credentials may only be used inside Anthropic's own tools.
 The platform therefore **never receives or stores a Claude token**; Claude-plan reviews run in the
@@ -111,7 +111,7 @@ Provider, model, minimum severity, ignored paths, max issues, language, trigger,
 - Re-run with a different provider; P2: side-by-side "second opinion" showing agreement/disagreement.
 
 ### 7.9 Teams & billing — P1 (required to sell)
-- Orgs with roles: owner, admin, member.
+- Orgs with roles: owner, admin, member (Better Auth organization plugin).
 - Stripe subscriptions; plans limit repos, reviews/month, history retention. We charge for the platform,
   not tokens (except platform-default usage limits).
 
@@ -130,7 +130,8 @@ Provider, model, minimum severity, ignored paths, max issues, language, trigger,
   (AES-256-GCM); secrets never logged; AI output treated as untrusted (validated, escaped).
 - **Privacy:** source code is processed in memory during review and not stored; we store findings,
   metadata and scores. Secret-like files are never sent to AI.
-- **Reliability:** webhooks acknowledged < 1s; jobs idempotent; retries with backoff; daily DB backups.
+- **Reliability:** webhooks acknowledged < 1s; background jobs are durable Inngest functions (idempotent,
+  step-level retries with backoff); daily DB backups.
 - **Performance:** typical PR (< 30 files) completed < 3 min; dashboard pages < 1s p95.
 - **Accessibility:** keyboard navigable; color never the only signal.
 
@@ -147,7 +148,7 @@ Provider, model, minimum severity, ignored paths, max issues, language, trigger,
 ## 11. Release plan
 | Phase | Scope | Est. |
 |---|---|---|
-| **0 Foundation** | Monorepo, DB schema, shared contracts | ~1 day |
+| **0 Foundation** | Monorepo, DB schema, shared contracts, Next.js skeleton (Better Auth, Inngest endpoint) | ~1 day |
 | **1 MVP (internal)** | GitHub App, platform-default + Claude Action modes, scoring, inline comments, basic dashboard | ~3 weeks |
 | **2 Multi-provider + history** | Codex (ChatGPT plan + Action), intent-aware prompts, risk history, org overview | ~2–3 weeks |
 | **3 Sellable** | Teams, Stripe, plan limits, prod hardening, legal pages, Marketplace listing | ~3–4 weeks |

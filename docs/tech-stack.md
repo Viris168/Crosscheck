@@ -87,7 +87,7 @@ shapes are **zod schemas shared** between client and server.
 ## Background jobs (Inngest)
 | Function | Trigger event | Does |
 |---|---|---|
-| `review-start` | `review/requested` `{ reviewId }` | Fetch diff + context, chunk; **one `step.run` per chunk** (provider call + save issues); then send `review/finalize` |
+| `review-start` | `review/requested` `{ reviewId, orgId }` | Fetch diff + context, chunk; **one `step.run` per chunk** (provider call + save issues); then send `review/finalize` |
 | `review-finalize` | `review/finalize` `{ reviewId }` | Drop out-of-diff issues, compute risk, post GitHub review, mark completed |
 | `review-sweep` | cron every 5 min | `waiting_action` > 30 min → failed `action_missing`; `running` > 20 min → failed `timeout` |
 

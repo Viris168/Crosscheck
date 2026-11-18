@@ -55,6 +55,8 @@ export async function postReview(octokit, args: {
 - On re-run for a newer commit: mark the previous bot review's summary as outdated (edit body prefix
   "Outdated — see newer review") rather than deleting.
 - If GitHub returns 422 for a comment, retry once without that comment.
+- Both packages are plain TypeScript (no Next.js / Inngest imports); lane B calls them from
+  the `review-finalize` Inngest function.
 
 ## Tests
 - `computeRisk` table tests for each factor and level boundaries

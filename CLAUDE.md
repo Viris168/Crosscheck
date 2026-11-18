@@ -1,6 +1,7 @@
 # CLAUDE.md — AI Code Review Platform
 
-Read this file at the start of every session. Then read your task file in `tasks/`.
+Read this file at the start of every session. Then read `docs/tech-stack.md` (it wins over every other doc),
+`docs/essential-architecture.md`, and your task file in `tasks/`.
 
 ## What we are building
 A multi-tenant SaaS that reviews GitHub pull requests with AI. Users pick a reviewer per repo
@@ -8,25 +9,30 @@ A multi-tenant SaaS that reviews GitHub pull requests with AI. Users pick a revi
 or the platform default). Every path produces the same `ReviewResult` JSON. The platform computes
 a risk score, stores history, posts inline PR comments, and shows a dashboard.
 
-## Stack
+## Stack (details: `docs/tech-stack.md`)
 - Monorepo: pnpm workspaces + Turborepo, TypeScript (strict) everywhere
-- `apps/web`: Next.js (App Router) + Tailwind + Auth.js (GitHub login). Includes dashboard read API routes.
-- `apps/api`: Fastify. Only public machine endpoints: GitHub webhooks + Action result ingest.
-- `apps/worker`: BullMQ worker (Redis)
-- `packages/db`: Prisma + PostgreSQL
-- `packages/shared`: contracts (zod schemas, enums, job payloads, provider interface, crypto/token utils)
-- Tests: Vitest. HTTP mocking: msw or nock.
+- `apps/web`: the ONE app. Next.js (App Router) + React + Tailwind + shadcn/ui. UI, REST route handlers
+  (`src/app/api/**/route.ts`), webhook + ingest endpoints, and the Inngest endpoint `/api/inngest`.
+  No separate API server, no worker app, no tRPC.
+- Auth: Better Auth (GitHub social login + organization plugin for orgs, members, roles)
+- Background jobs: Inngest (self-hosted) functions in `apps/web/src/server/jobs`
+- Data fetching: TanStack Query hooks over one typed `apiFetch` client
+- `packages/db`: Prisma + PostgreSQL 16 · Redis 7 (Inngest, webhook dedupe, rate limits)
+- `packages/shared`: contracts (zod API schemas, Inngest event schemas, enums, provider interface, crypto/token utils)
+- Tests: Vitest (unit/integration), Playwright (e2e smoke). HTTP mocking: msw or nock.
 
 ## Folder ownership (STRICT)
+All `apps/web/src/...` paths below are relative to the repo root.
+
 | Path | Owner |
 |---|---|
-| root config, `packages/shared`, `packages/db`, `apps/api/src/server.ts`, `docker-compose.dev.yml`, `.env.example`, `CLAUDE.md` | Foundation |
-| `packages/github`, `apps/api/src/github/` | A — GitHub integration |
-| `apps/worker/` | B — Review worker |
+| root config, `packages/shared`, `packages/db`, `docker-compose.dev.yml`, `.env.example`, `CLAUDE.md`, `apps/web/src/server/{auth,env,redis}.ts`, `apps/web/src/app/api/{auth,inngest,health}/` | Foundation |
+| `packages/github`, `apps/web/src/server/github/`, `apps/web/src/app/api/webhooks/github/` | A — GitHub integration |
+| `apps/web/src/server/jobs/` (Inngest client + functions) | B — Jobs |
 | `packages/providers/` | C — AI providers |
-| `apps/api/src/ingest/`, `packages/workflow-templates/` | D — Ingest + Actions |
+| `apps/web/src/server/ingest/`, `apps/web/src/app/api/ingest/`, `packages/workflow-templates/` | D — Ingest + Actions |
 | `packages/scoring/`, `packages/github-comments/` | E — Scoring + comments |
-| `apps/web/` | F — Frontend |
+| `apps/web/src/app/` (pages + dashboard API routes, except the API folders owned above), `apps/web/src/components/`, `apps/web/src/hooks/`, `apps/web/src/lib/` | F — Frontend |
 | `infra/`, `.github/workflows/`, `docs/deploy.md` | G — Infra |
 
 **Rules**
@@ -34,10 +40,14 @@ a risk score, stores history, posts inline PR comments, and shows a dashboard.
 2. Never edit `packages/shared` or `packages/db` unless your task is Foundation. If you need a contract
    change, STOP and write the proposed change in `tasks/CONTRACT_REQUESTS.md`, then continue with a local
    workaround or mock.
-3. Import other lanes only through their package's public `index.ts`. If that package is not ready, use the
-   mock described in your task file.
-4. Every lane ships with tests. `pnpm turbo test --filter <your-package>` must pass before you open a PR.
-5. No secrets in code. Read config from env (see `.env.example`). Never log tokens, keys, or code contents.
+3. Import other lanes only through their public entry: a package's `src/index.ts`, or for folders inside
+   `apps/web` the folder's `index.ts` (e.g. `@/server/jobs`, `@/server/github`). If it is not merged yet,
+   use the mock described in your task file.
+4. `apps/web/package.json` is the one file several lanes touch (to add dependencies). Only add the lines you
+   need; on merge conflicts keep the union of dependencies.
+5. Every lane ships with tests. `pnpm turbo test --filter <your-package>` (for `apps/web` lanes:
+   `pnpm --filter @app/web test -- <your folder>`) must pass before you open a PR.
+6. No secrets in code. Read config from env (see `.env.example`). Never log tokens, keys, or code contents.
 
 ## Security non-negotiables
 - The platform NEVER stores or receives a user's Claude OAuth token or their OpenAI API key used in Actions.
@@ -48,21 +58,28 @@ a risk score, stores history, posts inline PR comments, and shows a dashboard.
 - Treat AI output and ingest payloads as untrusted: validate with zod, escape markdown, drop issues whose
   file/line is not in the PR diff.
 - Never send to an AI provider: `.env*`, `*.pem`, `*.key`, lockfiles, files matching repo ignore settings.
+- Inngest event payloads carry ids only — never code, patches or tokens.
+- Every dashboard route checks the Better Auth session **and** org membership for the requested resource.
 
 ## Commands
 ```bash
 pnpm install
-docker compose -f docker-compose.dev.yml up -d   # postgres + redis
+docker compose -f docker-compose.dev.yml up -d   # postgres + redis + inngest dev server
 pnpm db:migrate                                  # prisma migrate dev
-pnpm dev                                         # all apps
+pnpm dev                                         # next dev (apps/web)
 pnpm turbo test                                  # all tests
 pnpm turbo lint typecheck
 ```
+Inngest dev UI: http://localhost:8288
 
 ## Conventions
-- Package names: `@app/<name>`. Each package exports from `src/index.ts`.
+- Package names: `@app/<name>`. Each package exports from `src/index.ts`. The app is `@app/web`.
+- REST + zod: every endpoint's request/response schema lives in `packages/shared/src/api/<area>.ts`.
+  Handlers `schema.parse` input (400 on failure); errors are `{ error: { code, message } }`.
 - Errors that reach users map to an `ErrorCode` from `@app/shared`.
+- Library APIs you are not sure of (Better Auth, Inngest, Next.js, Sign in with ChatGPT, GitHub Actions):
+  check current docs; mark assumptions with `// VERIFY:` and list them in the PR description.
 - Logging: `pino`, structured, include `reviewId` / `repoId` where relevant.
-- Small commits, conventional messages (`feat(worker): …`, `fix(web): …`).
+- Small commits, conventional messages (`feat(jobs): …`, `fix(web): …`).
 - When done: open a PR from your branch to `main` with a description of what changed, why, how it was
   tested, and anything left undone. Codex will review it.

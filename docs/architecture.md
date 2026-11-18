@@ -1,7 +1,8 @@
 # Architecture — AI Code Review Platform
 
 Full technical design. For the one-page version agents should load first, see
-`docs/essential-architecture.md`. Product requirements: `docs/prd.md`.
+`docs/essential-architecture.md`. Product requirements: `docs/prd.md`. Stack decisions:
+`docs/tech-stack.md` (wins over this file if they disagree).
 
 ---
 
@@ -11,30 +12,32 @@ Full technical design. For the one-page version agents should load first, see
 flowchart LR
   Dev[Developer] -->|opens PR| GH[GitHub]
   Dev -->|uses dashboard| Web
-  GH -->|webhooks| API
+  GH -->|webhooks| Caddy
   subgraph Platform [Our VPS - Docker Compose]
-    Caddy[Caddy HTTPS] --> Web[apps/web - Next.js]
-    Caddy --> API[apps/api - Fastify]
-    API --> Redis[(Redis / BullMQ)]
-    Web --> PG[(PostgreSQL)]
-    API --> PG
-    Worker[apps/worker] --> Redis
-    Worker --> PG
+    Caddy[Caddy HTTPS] --> Web[apps/web - Next.js<br/>UI + REST + /api/inngest]
+    Web -->|send events| Inngest[Inngest server]
+    Inngest -->|invoke functions| Web
+    Inngest --> Redis[(Redis)]
+    Inngest --> IPG[(Postgres: inngest DB)]
+    Web --> PG[(Postgres: app DB)]
+    Web --> Redis
   end
-  Worker -->|platform / ChatGPT-plan calls| LLM[Anthropic / OpenAI]
-  Worker -->|fetch diff, post review| GH
+  Web -->|platform / ChatGPT-plan calls| LLM[Anthropic / OpenAI]
+  Web -->|fetch diff, post review| GH
   GH -->|runs user's Action| GHA[User's GitHub Actions<br/>Claude Code / Codex]
-  GHA -->|review.json| API
+  GHA -->|review.json| Caddy
 ```
 
 ## 2. Components
 
 | Component | Tech | Responsibility |
 |---|---|---|
-| `apps/web` | Next.js App Router, Tailwind, Auth.js | UI, GitHub login, dashboard read API (`/app/api/*`), settings, setup wizard, ChatGPT OAuth routes |
-| `apps/api` | Fastify | Public machine endpoints only: `/api/webhooks/github`, `/api/ingest/review`, `/health` |
-| `apps/worker` | BullMQ | Run reviews (chunking, provider calls), finalize (score + comments), sweep stuck reviews |
-| `packages/shared` | TS + zod | Contracts: enums, `ReviewResult` schema, provider interface, job payloads, API shapes, crypto |
+| `apps/web` | Next.js App Router + React, Tailwind + shadcn/ui, TanStack Query, Better Auth | The one app: UI, GitHub login + orgs, dashboard REST API, settings, setup wizard, ChatGPT OAuth routes, webhook route, ingest route, `/api/inngest` |
+| `apps/web/src/server/github` | Next.js route handler | Webhook handling (lane A) |
+| `apps/web/src/server/ingest` | Next.js route handler | Action result ingest (lane D) |
+| `apps/web/src/server/jobs` | Inngest functions | Run reviews (chunking, provider calls), finalize (score + comments), sweep stuck reviews (lane B) |
+| Inngest server | `inngest/inngest` (self-hosted) | Event bus, scheduling, step state, retries, run history UI |
+| `packages/shared` | TS + zod | Contracts: enums, `ReviewResult` schema, provider interface, Inngest event schemas, REST API schemas, crypto |
 | `packages/db` | Prisma | Schema, migrations, client |
 | `packages/github` | Octokit | App auth, installation tokens, PR/file fetch, webhook signature check |
 | `packages/providers` | Anthropic/OpenAI SDKs | Prompt builder, provider implementations, output parsing, ChatGPT OAuth helpers |
@@ -44,14 +47,15 @@ flowchart LR
 | Infra | Docker, Caddy, Postgres 16, Redis 7 | Single VPS, auto HTTPS, backups |
 
 Dependency rule: apps depend on packages; packages depend only on `shared`/`db` and each other's
-public `index.ts`; no package depends on an app.
+public `index.ts`; no package depends on an app. Inside `apps/web`, lane folders import each other only
+through their `index.ts` (`@/server/jobs`, `@/server/github`, `@/server/ingest`).
 
 ## 3. Provider modes
 
-| `ProviderId` | `runsInWorker` | Credential location | Result path |
+| `ProviderId` | `runsInWorker` (= runs in our Inngest functions) | Credential location | Result path |
 |---|---|---|---|
-| `platform` | yes | Our env (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) | Worker → DB |
-| `codex_chatgpt` | yes | `ProviderCredential` (encrypted OAuth token from Sign in with ChatGPT) | Worker → DB |
+| `platform` | yes | Our env (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) | Inngest function → DB |
+| `codex_chatgpt` | yes | `ProviderCredential` (encrypted OAuth token from Sign in with ChatGPT) | Inngest function → DB |
 | `claude_action` | no | User's repo secret `CLAUDE_CODE_OAUTH_TOKEN` (never reaches us) | Action → `/api/ingest/review` |
 | `codex_action` | no | User's repo secret `OPENAI_API_KEY` (never reaches us) | Action → `/api/ingest/review` |
 
@@ -59,58 +63,61 @@ All four produce `ReviewResult` (schema v1). Everything after that is shared.
 
 ## 4. Main flows
 
-### 4.1 Worker-run review (`platform`, `codex_chatgpt`)
+### 4.1 Job-run review (`platform`, `codex_chatgpt`)
 ```mermaid
 sequenceDiagram
   participant GH as GitHub
-  participant API as apps/api
-  participant Q as Redis/BullMQ
-  participant W as apps/worker
+  participant WH as web: /api/webhooks/github
+  participant I as Inngest server
+  participant F as web: Inngest functions
   participant P as Provider (LLM)
   participant DB as Postgres
-  GH->>API: pull_request (opened/synchronize)
-  API->>API: verify signature, dedupe delivery
-  API->>DB: upsert PR, create Review(queued, headSha)
-  API->>Q: review.start {reviewId}
-  API-->>GH: 200 (<1s)
-  W->>Q: take review.start
-  W->>DB: status=running
-  W->>GH: fetch files, AGENTS.md, CHANGE_NOTES.md
-  W->>W: filter + chunk (~60k tokens)
-  loop each chunk (concurrency 3)
-    W->>P: reviewChunk(input)
-    P-->>W: ReviewChunkResult (validated)
-    W->>DB: insert issues, filesDone += n
+  GH->>WH: pull_request (opened/synchronize)
+  WH->>WH: verify signature, dedupe delivery (Redis)
+  WH->>DB: upsert PR, create Review(queued, headSha)
+  WH->>I: send review/requested {reviewId, orgId}
+  WH-->>GH: 200 (<1s)
+  I->>F: invoke review-start
+  F->>DB: step: status=running
+  F->>GH: step: fetch files, AGENTS.md, CHANGE_NOTES.md
+  F->>F: filter + chunk (~60k tokens)
+  loop one step.run per chunk (3 in parallel)
+    F->>P: reviewChunk(input)
+    P-->>F: ReviewChunkResult (validated)
+    F->>DB: insert issues, filesDone += n
   end
-  W->>Q: review.finalize {reviewId}
-  W->>W: computeRisk()
-  W->>GH: create PR review (summary + inline comments)
-  W->>DB: status=completed, risk, githubReviewId
+  F->>I: send review/finalize {reviewId}
+  I->>F: invoke review-finalize
+  F->>F: computeRisk()
+  F->>GH: create PR review (summary + inline comments)
+  F->>DB: status=completed, risk, githubReviewId
 ```
+Step outputs are stored by Inngest, so steps return ids/counts only — never patches or AI text.
 
 ### 4.2 Action-run review (`claude_action`, `codex_action`)
 ```mermaid
 sequenceDiagram
   participant GH as GitHub
-  participant API as apps/api
+  participant WEB as apps/web
   participant A as User's Action
-  participant Q as Redis/BullMQ
-  participant W as apps/worker
-  GH->>API: pull_request webhook
-  API->>API: create Review(waiting_action)
+  participant I as Inngest server
+  participant F as web: Inngest functions
+  GH->>WEB: pull_request webhook
+  WEB->>WEB: create Review(waiting_action)
   GH->>A: run ai-review.yml (same event)
   A->>A: Claude Code / Codex writes review.json
-  A->>API: POST /api/ingest/review (Bearer ingest token)
-  API->>API: hash token → repo, zod validate, check PR + head_sha
-  API->>API: save issues
-  API->>Q: review.finalize {reviewId}
-  W->>GH: post review (same finalize as 4.1)
+  A->>WEB: POST /api/ingest/review (Bearer ingest token)
+  WEB->>WEB: hash token → repo, zod validate, check PR + head_sha
+  WEB->>WEB: save issues
+  WEB->>I: send review/finalize {reviewId}
+  I->>F: invoke review-finalize
+  F->>GH: post review (same finalize as 4.1)
 ```
 
 ### 4.3 Sign in with ChatGPT
 `/api/oauth/chatgpt/start` (web) → OpenAI authorize → `/api/oauth/chatgpt/callback` →
-`chatgptOAuth.exchangeCode()` → `encrypt()` tokens → `ProviderCredential`. Worker refreshes on expiry and
-saves back encrypted. Exact endpoints/scopes: verify against OpenAI's current developer docs.
+`chatgptOAuth.exchangeCode()` → `encrypt()` tokens → `ProviderCredential`. The provider refreshes on expiry
+(inside the Inngest step) and saves back encrypted. Exact endpoints/scopes: verify against OpenAI's current developer docs.
 
 ### 4.4 Setup wizard: commit workflow
 Web calls `openWorkflowPR()` (`@app/workflow-templates`) with an installation Octokit → branch
@@ -120,9 +127,9 @@ Web calls `openWorkflowPR()` (`@app/workflow-templates`) with an installation Oc
 
 ```mermaid
 stateDiagram-v2
-  [*] --> queued: webhook (worker provider)
+  [*] --> queued: webhook (job provider)
   [*] --> waiting_action: webhook (action provider)
-  queued --> running: review.start
+  queued --> running: review-start
   running --> completed: finalize ok
   running --> failed: all chunks failed / timeout (20m)
   waiting_action --> completed: ingest + finalize
@@ -146,10 +153,17 @@ stateDiagram-v2
 
 ## 6. Data model
 
+Auth tables come from **Better Auth** (Prisma adapter): `User`, `Session`, `Account`, `Verification`, and
+from the organization plugin `Organization` (= our **Org**), `Member` (= our **Membership**, roles
+owner|admin|member) and `Invitation`. We add our own fields to them (Better Auth `additionalFields`).
+The GitHub user id comes from the `Account` row (`providerId = 'github'`).
+
 ```mermaid
 erDiagram
   Org ||--o{ Membership : has
   User ||--o{ Membership : has
+  User ||--o{ Session : has
+  User ||--o{ Account : has
   Org ||--o{ Installation : has
   Installation ||--o{ Repo : grants
   Org ||--o{ Repo : owns
@@ -173,14 +187,18 @@ Not stored: source code, patches, prompts, raw AI responses (log only sizes/ids)
 
 ## 7. Interfaces
 
-### Public HTTP (apps/api)
+All HTTP is REST route handlers in `apps/web/src/app/api/**/route.ts`. Every request/response shape is a
+zod schema in `packages/shared/src/api/<area>.ts`. Errors: `{ error: { code, message } }`.
+
+### Public HTTP (called by GitHub / Actions / Inngest, not the browser)
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | POST | `/api/webhooks/github` | HMAC `X-Hub-Signature-256` | Events: `installation`, `installation_repositories`, `pull_request`, `issue_comment` |
-| POST | `/api/ingest/review` | `Bearer rit_…` (hashed lookup) | Body `ReviewResult` ≤ 1 MB; 202 / 400 / 401 / 409 / 413 |
-| GET | `/health` | none | |
+| POST | `/api/ingest/review` | `Bearer rit_…` (hashed lookup) | Body `ReviewResult` ≤ 1 MB; 202 / 400 / 401 / 409 / 413 / 429 |
+| GET | `/api/health` | none | |
+| GET/POST/PUT | `/api/inngest` | Inngest signing key | Inngest SDK `serve()` |
 
-### Dashboard API (apps/web, session auth + org membership check)
+### Dashboard API (Better Auth session + org membership check)
 | Method | Path |
 |---|---|
 | GET | `/api/repos` |
@@ -192,13 +210,19 @@ Not stored: source code, patches, prompts, raw AI responses (log only sizes/ids)
 | POST | `/api/repos/:repoId/setup/workflow-pr` |
 | GET | `/api/orgs/:orgId/overview?range=30d\|90d` |
 | GET | `/api/oauth/chatgpt/start`, `/api/oauth/chatgpt/callback`; DELETE `/api/connections/chatgpt` |
+| * | `/api/auth/*` (Better Auth handler) |
 
-### Queue (`reviews`)
-| Job | Payload | Producer |
-|---|---|---|
-| `review.start` | `{ reviewId }` | api (webhook), web (retry/rerun) |
-| `review.finalize` | `{ reviewId }` | worker, api (ingest) |
-| `review.sweep` | — (repeatable, 5 min) | worker scheduler |
+### Inngest events and functions
+Event names + zod payload schemas: `packages/shared/src/events.ts`.
+
+| Function | Trigger | Producer | Settings |
+|---|---|---|---|
+| `review-start` | event `review/requested` `{ reviewId, orgId }` | webhook (A), dashboard retry/rerun (F) | concurrency 3 per `orgId`; one `step.run` per chunk |
+| `review-finalize` | event `review/finalize` `{ reviewId }` | `review-start` (B), ingest (D) | idempotent on review status |
+| `review-sweep` | cron `*/5 * * * *` | Inngest scheduler | — |
+
+Retries: `timeout` / `rate_limited` ×2, `invalid_output` ×1, `provider_auth` ×0 (`NonRetriableError`).
+Payloads carry ids only.
 
 ### Provider interface
 `ReviewProvider.reviewChunk(ReviewChunkInput, ProviderContext) → ReviewChunkResult`;
@@ -209,7 +233,8 @@ throws `ProviderError(code)`. Defined in `packages/shared/provider.ts`.
 2. **Context:** PR title/body, `CHANGE_NOTES.md`, `AGENTS.md` at head SHA.
 3. **Chunk:** est. tokens = chars/4; pack ≤ 60k; oversize file → first hunks + note; total > 400k →
    prioritize sensitive paths, mark `too_large` warning.
-4. **Call:** concurrency 3; 90s timeout; retries: timeout/rate_limited ×2, invalid_output ×1, auth ×0.
+4. **Call:** one Inngest `step.run` per chunk, 3 in parallel; 90s timeout; retries: timeout/rate_limited ×2,
+   invalid_output ×1, auth ×0 (`NonRetriableError`).
 5. **Validate:** extract JSON, zod parse; drop issues not in diff.
 6. **Score:** `computeRisk` (weights in `packages/scoring/src/weights.ts`):
    AI max × 0.4 + issue severity (cap 40) + size + sensitive paths + missing tests → 0–100.
@@ -219,7 +244,9 @@ throws `ProviderError(code)`. Defined in `packages/shared/provider.ts`.
 ## 9. Security
 | Area | Control |
 |---|---|
-| Webhooks | HMAC SHA-256, timing-safe compare, delivery dedupe (Redis, 24h) |
+| Webhooks | HMAC SHA-256 over the raw body, timing-safe compare, delivery dedupe (Redis, 24h) |
+| Inngest | `/api/inngest` verified with `INNGEST_SIGNING_KEY`; Inngest dashboard not public (SSH tunnel only) |
+| Sessions | Better Auth (`BETTER_AUTH_SECRET`), HTTP-only cookies |
 | Ingest | Per-repo random token (`rit_`), stored as SHA-256 only, rotatable, rate-limited 30/h |
 | User credentials | Claude/OpenAI keys for Actions never touch platform; ChatGPT tokens AES-256-GCM |
 | Tenant isolation | Every dashboard query scoped by org membership |
@@ -234,12 +261,11 @@ throws `ProviderError(code)`. Defined in `packages/shared/provider.ts`.
 ```
 VPS (Ubuntu LTS)
 └── docker compose (infra/compose.prod.yml)
-    ├── caddy        :80/:443  → auto Let's Encrypt
-    ├── web          :3000     (Next.js)
-    ├── api          :4000     (Fastify)
-    ├── worker       ×N        (BullMQ)
+    ├── caddy        :80/:443  → auto Let's Encrypt, everything → web:3000
+    ├── web          :3000     (Next.js: UI + API + Inngest functions)
+    ├── inngest      :8288     (self-hosted Inngest; dashboard via SSH tunnel only)
     ├── migrate      one-shot  (prisma migrate deploy)
-    ├── postgres     volume
+    ├── postgres     volume    (DBs: app, inngest)
     └── redis        volume, AOF
 ```
 - CI (`.github/workflows/ci.yml`): lint, typecheck, test, build on every PR.
@@ -250,24 +276,26 @@ VPS (Ubuntu LTS)
 ## 11. Observability
 - Structured logs (pino) with `reviewId`, `repoId`, `orgId`; rotated container logs.
 - Health endpoints for uptime monitor; optional Sentry.
-- Key metrics (from DB): reviews by status/provider, duration p50/p95, error code counts, queue depth.
+- Key metrics (from DB): reviews by status/provider, duration p50/p95, error code counts.
+- Inngest dashboard: run history, step retries, backlog per function.
 
 ## 12. Scaling path
 | Stage | Change |
 |---|---|
-| Now | Single VPS, worker ×2–4 |
-| More load | Scale `worker` replicas; move Postgres to managed DB |
-| Bigger | Separate worker host(s); Redis managed; CDN for web |
-| Enterprise | Per-tenant queues/rate limits; GitHub Enterprise Server support |
+| Now | Single VPS, one `web` container + `inngest` |
+| More load | Scale `web` replicas (Inngest spreads function calls); move Postgres to managed DB |
+| Bigger | Separate `web` deployment just for `/api/inngest` traffic; Redis managed; CDN for web |
+| Enterprise | Per-tenant concurrency/rate limits (Inngest keys); GitHub Enterprise Server support |
 
 ## 13. Key decisions
 | # | Decision | Reason |
 |---|---|---|
 | D1 | One `ReviewResult` schema for all providers | Consistent scoring, comments, UI; providers swappable |
 | D2 | Claude-plan reviews run in the user's Action, never on our servers | Anthropic restricts consumer-plan credentials to its own tools |
-| D3 | Codex-plan reviews via Sign in with ChatGPT on our worker | Officially supported for third-party apps; zero setup for user |
+| D3 | Codex-plan reviews via Sign in with ChatGPT in our Inngest functions | Officially supported for third-party apps; zero setup for user |
 | D4 | Our GitHub App posts comments (not the agent in the Action) | Same formatting and filtering for every provider |
-| D5 | Fastify api separate from Next.js | Webhooks/ingest isolated from UI; independent scaling and limits |
-| D6 | BullMQ + Redis | Simple, reliable retries/backoff; fits single VPS |
+| D5 | One Next.js app for UI + REST + webhooks + ingest (no Fastify/Nest, no tRPC) | Backend is small; one deployable, no CORS/cross-domain auth; REST + zod is ready for a public API |
+| D6 | Inngest (self-hosted) instead of BullMQ | Durable steps, step-level retries, per-org concurrency, run history UI |
+| D9 | Better Auth instead of Auth.js | Built-in organizations, members and roles for multi-tenant |
 | D7 | Don't store code | Trust + lower compliance burden |
 | D8 | Chunk per file group | Large PRs (100+ files) otherwise exceed context/timeouts |
