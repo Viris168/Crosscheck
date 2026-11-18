@@ -1,0 +1,21 @@
+{
+  "action": "closed",
+  "number": 12,
+  "pull_request": {
+    "number": 12,
+    "title": "Add login rate limiting",
+    "body": "Fixes #3",
+    "state": "closed",
+    "draft": false,
+    "merged": true,
+    "user": { "login": "bob", "id": 7002 },
+    "head": { "sha": "cccccccccccccccccccccccccccccccccccccccc", "ref": "feat/rate-limit" },
+    "base": { "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "ref": "main" },
+    "additions": 130,
+    "deletions": 9,
+    "changed_files": 5
+  },
+  "repository": { "id": 2001, "full_name": "Acme/web", "private": true },
+  "installation": { "id": 1001 },
+  "sender": { "login": "alice", "id": 7001, "type": "User" }
+}

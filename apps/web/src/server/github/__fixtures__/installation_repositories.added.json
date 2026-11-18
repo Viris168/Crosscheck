@@ -1,0 +1,13 @@
+{
+  "action": "added",
+  "installation": {
+    "id": 1001,
+    "account": { "login": "Acme", "id": 5001, "type": "Organization" }
+  },
+  "repository_selection": "selected",
+  "repositories_added": [
+    { "id": 2003, "name": "docs", "full_name": "Acme/docs", "private": false }
+  ],
+  "repositories_removed": [],
+  "sender": { "login": "alice", "id": 7001, "type": "User" }
+}

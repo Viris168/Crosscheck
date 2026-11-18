@@ -1,0 +1,23 @@
+{
+  "action": "synchronize",
+  "number": 12,
+  "before": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "after": "cccccccccccccccccccccccccccccccccccccccc",
+  "pull_request": {
+    "number": 12,
+    "title": "Add login rate limiting",
+    "body": "Fixes #3",
+    "state": "open",
+    "draft": false,
+    "merged": false,
+    "user": { "login": "bob", "id": 7002 },
+    "head": { "sha": "cccccccccccccccccccccccccccccccccccccccc", "ref": "feat/rate-limit" },
+    "base": { "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "ref": "main" },
+    "additions": 130,
+    "deletions": 9,
+    "changed_files": 5
+  },
+  "repository": { "id": 2001, "full_name": "Acme/web", "private": true },
+  "installation": { "id": 1001 },
+  "sender": { "login": "bob", "id": 7002, "type": "User" }
+}

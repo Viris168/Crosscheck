@@ -1,0 +1,13 @@
+{
+  "action": "removed",
+  "installation": {
+    "id": 1001,
+    "account": { "login": "Acme", "id": 5001, "type": "Organization" }
+  },
+  "repository_selection": "selected",
+  "repositories_added": [],
+  "repositories_removed": [
+    { "id": 2002, "name": "api", "full_name": "Acme/api", "private": false }
+  ],
+  "sender": { "login": "alice", "id": 7001, "type": "User" }
+}

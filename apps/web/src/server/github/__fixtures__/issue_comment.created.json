@@ -1,0 +1,17 @@
+{
+  "action": "created",
+  "issue": {
+    "number": 12,
+    "title": "Add login rate limiting",
+    "pull_request": { "url": "https://api.github.com/repos/Acme/web/pulls/12" }
+  },
+  "comment": {
+    "id": 9001,
+    "body": "/review please",
+    "author_association": "MEMBER",
+    "user": { "login": "alice", "id": 7001, "type": "User" }
+  },
+  "repository": { "id": 2001, "full_name": "Acme/web", "private": true },
+  "installation": { "id": 1001 },
+  "sender": { "login": "alice", "id": 7001, "type": "User" }
+}
