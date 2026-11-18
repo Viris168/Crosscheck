@@ -1,0 +1,9 @@
+{
+  "action": "deleted",
+  "installation": {
+    "id": 1001,
+    "account": { "login": "Acme", "id": 5001, "type": "Organization" }
+  },
+  "repositories": [{ "id": 2001, "full_name": "Acme/web" }],
+  "sender": { "login": "alice", "id": 7001, "type": "User" }
+}

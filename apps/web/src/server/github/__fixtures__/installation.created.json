@@ -1,0 +1,15 @@
+{
+  "action": "created",
+  "installation": {
+    "id": 1001,
+    "account": { "login": "Acme", "id": 5001, "type": "Organization" },
+    "repository_selection": "selected",
+    "app_id": 42,
+    "target_type": "Organization"
+  },
+  "repositories": [
+    { "id": 2001, "node_id": "R_1", "name": "web", "full_name": "Acme/web", "private": true },
+    { "id": 2002, "node_id": "R_2", "name": "api", "full_name": "Acme/api", "private": false }
+  ],
+  "sender": { "login": "alice", "id": 7001, "type": "User" }
+}
