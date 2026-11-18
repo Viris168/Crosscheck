@@ -28,6 +28,7 @@ export function SignOutButton() {
       variant="outline"
       onClick={async () => {
         await signOut();
+        router.push('/sign-in');
         router.refresh();
       }}
     >
