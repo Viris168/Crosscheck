@@ -1,0 +1,51 @@
+# Local dev services: postgres + redis + Inngest dev server.
+# The Next.js app runs on the host (`pnpm dev`), not in Docker.
+#   docker compose -f docker-compose.dev.yml up -d
+name: ai-review-dev
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Creates the second database `inngest` on first start.
+      - ./scripts/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app -d app']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  inngest:
+    image: inngest/inngest:latest
+    # VERIFY: dev-server command/flags against current Inngest self-hosting docs.
+    # `inngest dev` keeps state in memory; production uses `inngest start` with --postgres-uri/--redis-uri.
+    command: ['inngest', 'dev', '-u', 'http://host.docker.internal:3000/api/inngest']
+    ports:
+      - '127.0.0.1:${INNGEST_PORT:-8288}:8288'
+      - '127.0.0.1:8289:8289'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+
+volumes:
+  pgdata:
+  redisdata:

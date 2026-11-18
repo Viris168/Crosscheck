@@ -1,0 +1,32 @@
+{
+  "name": "ai-code-review",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev --filter @app/web",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "pnpm --filter @app/db db:generate",
+    "db:migrate": "pnpm --filter @app/db db:migrate",
+    "db:deploy": "pnpm --filter @app/db db:deploy",
+    "db:seed": "pnpm --filter @app/db db:seed",
+    "db:studio": "pnpm --filter @app/db db:studio"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "eslint": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "globals": "catalog:",
+    "prettier": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:"
+  }
+}
