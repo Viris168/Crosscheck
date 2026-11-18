@@ -28,6 +28,23 @@ export const ReviewDetailSchema = z.object({
 });
 export type ReviewDetail = z.infer<typeof ReviewDetailSchema>;
 
+/** One row of a PR's review history (GetPullResponse.reviews). */
+export const ReviewSummarySchema = z.object({
+  id: Id,
+  status: z.enum(ReviewStatus),
+  provider: z.enum(ProviderId),
+  headSha: z.string(),
+  stale: z.boolean(),
+  createdAt: IsoDate,
+});
+export type ReviewSummary = z.infer<typeof ReviewSummarySchema>;
+
+/** POST /api/reviews/:id/cancel — only `queued` / `waiting_action` reviews; 409 otherwise. */
+export const CancelReviewResponse = z.object({
+  reviewId: Id,
+  status: z.enum(ReviewStatus),
+});
+
 /** POST /api/reviews/:id/retry */
 export const RetryReviewResponse = z.object({
   reviewId: Id,

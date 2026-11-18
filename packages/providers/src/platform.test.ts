@@ -61,6 +61,22 @@ describe('platform provider (Anthropic)', () => {
     expect(JSON.parse(String(init.body)).model).toBe('claude-haiku-5-5');
   });
 
+  it('prefers ctx.model and skips the settings lookup', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, anthropicMessage(JSON.stringify(validResultJson))),
+    );
+    const lookup = vi.fn(async () => 'claude-haiku-5-5');
+    const p = createPlatformProvider({
+      env: { ANTHROPIC_API_KEY: 'k' },
+      fetch: fetchMock as unknown as typeof fetch,
+      repoModelLookup: lookup,
+    });
+    await p.reviewChunk(sampleInput(), { ...ctx, model: 'claude-sonnet-5-5' });
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(JSON.parse(String(init.body)).model).toBe('claude-sonnet-5-5');
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
   it.each([
     [401, 'provider_auth'],
     [403, 'provider_auth'],

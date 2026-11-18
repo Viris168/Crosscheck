@@ -13,7 +13,14 @@ import {
 describe('enums', () => {
   it('match the locked contract values', () => {
     expect(ProviderId).toEqual(['claude_action', 'codex_chatgpt', 'codex_action', 'platform']);
-    expect(ReviewStatus).toEqual(['queued', 'running', 'waiting_action', 'completed', 'failed']);
+    expect(ReviewStatus).toEqual([
+      'queued',
+      'running',
+      'waiting_action',
+      'completed',
+      'failed',
+      'cancelled',
+    ]);
     expect(ErrorCode).toEqual([
       'too_large',
       'provider_auth',

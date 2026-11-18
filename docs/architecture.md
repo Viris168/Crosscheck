@@ -134,8 +134,11 @@ stateDiagram-v2
   running --> failed: all chunks failed / timeout (20m)
   waiting_action --> completed: ingest + finalize
   waiting_action --> failed: no result (30m) / no_output
+  queued --> cancelled: user Cancel
+  waiting_action --> cancelled: user Cancel
   failed --> queued: user Retry
   completed --> queued: user Re-run
+  cancelled --> queued: user Re-run
 ```
 `stale` is derived, not stored: `review.headSha !== pullRequest.headSha`.
 
@@ -204,12 +207,13 @@ zod schema in `packages/shared/src/api/<area>.ts`. Errors: `{ error: { code, mes
 | GET | `/api/repos` |
 | GET | `/api/repos/:repoId/pulls?state=open\|closed\|all` → `PullListItem[]` |
 | GET | `/api/repos/:repoId/pulls/:number` → PR + latest `ReviewDetail` |
-| POST | `/api/reviews/:id/retry`, `/api/repos/:repoId/pulls/:number/rerun` (`{provider?}`) |
+| GET | `/api/reviews/:id` → `ReviewDetail` (`GET .../pulls/:number` also returns `reviews[]` history) |
+| POST | `/api/reviews/:id/retry`, `/api/reviews/:id/cancel`, `/api/repos/:repoId/pulls/:number/rerun` (`{provider?}`) |
 | GET/PUT | `/api/repos/:repoId/settings` |
 | POST | `/api/repos/:repoId/ingest-token/rotate` → token shown once |
 | POST | `/api/repos/:repoId/setup/workflow-pr` |
 | GET | `/api/orgs/:orgId/overview?range=30d\|90d` |
-| GET | `/api/oauth/chatgpt/start`, `/api/oauth/chatgpt/callback`; DELETE `/api/connections/chatgpt` |
+| GET | `/api/oauth/chatgpt/start`, `/api/oauth/chatgpt/callback`; GET/DELETE `/api/connections/chatgpt` |
 | * | `/api/auth/*` (Better Auth handler) |
 
 ### Inngest events and functions

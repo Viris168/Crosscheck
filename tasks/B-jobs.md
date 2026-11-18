@@ -29,7 +29,7 @@ Switch via import only; delete mocks once real packages are merged.
 
 ### Function `review-start` — trigger event `review/requested` `{ reviewId, orgId }`
 Settings: `concurrency: { key: 'event.data.orgId', limit: 3 }` (3 reviews at once per org), `retries` per below.
-1. `step.run('load')`: load review + PR + repo. If status is not `queued`, return (idempotent).
+1. `step.run('load')`: load review + PR + repo. If status is not `queued` (e.g. the user `cancelled` it), return (idempotent).
 2. `step.run('mark-running')`: set `running`, `startedAt`.
 3. `step.run('plan')`: fetch PR files (`fetchPullRequestFiles`). Drop: removed files, binary/no patch,
    `repo.settings.ignorePaths`, secret-like files (`.env*`, `*.pem`, `*.key`), lockfiles.
@@ -40,7 +40,7 @@ Settings: `concurrency: { key: 'event.data.orgId', limit: 3 }` (3 reviews at onc
    `too_large` *warning* (review still completes). Set `filesTotal`.
    **Return only file paths per chunk** (step outputs are persisted by Inngest — never return patches).
 4. **One `step.run('chunk-<i>')` per chunk**, 3 in parallel (batches of `Promise.all`). Each step re-fetches
-   its files' patches, calls `getProvider(repo.provider).reviewChunk(...)`, inserts issues, increments
+   its files' patches, calls `getProvider(repo.provider).reviewChunk(input, { orgId, model: repo.settings.model })`, inserts issues, increments
    `filesDone`, and returns counts only. Make each chunk step idempotent (delete that chunk's issues before
    insert, or use a `[reviewId, chunkIndex]` marker).
 5. Retries by `ProviderError.code`: `timeout` / `rate_limited` → retry (max 2); `invalid_output` → retry

@@ -2,6 +2,7 @@
 
 import {
   GetRepoSettingsResponse,
+  ListReposResponse,
   PutRepoSettingsResponse,
   RotateIngestTokenResponse,
   WorkflowPrResponse,
@@ -10,13 +11,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { z } from 'zod';
 import type { PutRepoSettingsRequest, WorkflowPrRequest } from '@app/shared/client';
 import { apiFetch } from '@/lib/api-client';
-import { ListReposWithLastReviewResponse } from '@/lib/pending-contracts';
 import { queryKeys } from '@/lib/query-keys';
 
 export function useRepos() {
   return useQuery({
     queryKey: queryKeys.repos,
-    queryFn: () => apiFetch('/api/repos', ListReposWithLastReviewResponse),
+    queryFn: () => apiFetch('/api/repos', ListReposResponse),
   });
 }
 

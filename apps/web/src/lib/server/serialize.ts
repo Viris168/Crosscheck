@@ -8,8 +8,7 @@ import {
   type RiskResult,
 } from '@app/shared';
 import type { z } from 'zod';
-import type { PullHeaderSchema, PullListItem } from '@app/shared';
-import type { ReviewSummary } from '@/lib/pending-contracts';
+import type { PullHeaderSchema, PullListItem, ReviewSummary } from '@app/shared';
 
 type ReviewRisk = Pick<Review, 'riskScore' | 'riskLevel' | 'riskFactors'>;
 

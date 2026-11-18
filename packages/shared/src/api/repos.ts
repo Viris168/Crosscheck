@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ACTION_PROVIDERS, ProviderId } from '../enums';
 import { RepoSettingsSchema } from '../repo-settings';
 import { Id } from './common';
+import { LatestReviewSummarySchema } from './pulls';
 
 export const RepoParams = z.object({ repoId: Id });
 
@@ -16,8 +17,14 @@ export const RepoSchema = z.object({
 });
 export type Repo = z.infer<typeof RepoSchema>;
 
+/** GET /api/repos item: the repo + the latest review of its most recently updated PR. */
+export const RepoListItemSchema = RepoSchema.extend({
+  lastReview: LatestReviewSummarySchema.nullish(),
+});
+export type RepoListItem = z.infer<typeof RepoListItemSchema>;
+
 /** GET /api/repos */
-export const ListReposResponse = z.array(RepoSchema);
+export const ListReposResponse = z.array(RepoListItemSchema);
 
 /** GET /api/repos/:repoId/settings */
 export const GetRepoSettingsResponse = z.object({

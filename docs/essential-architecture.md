@@ -39,7 +39,8 @@ review-finalize (shared): drop out-of-diff issues → computeRisk → post GitHu
 ```
 
 ## Review states
-`queued → running → completed | failed` · `waiting_action → completed | failed`
+`queued → running → completed | failed` · `waiting_action → completed | failed` ·
+`queued | waiting_action → cancelled` (user Cancel; terminal, can be re-run)
 `stale` = review.headSha ≠ PR.headSha (derived, not stored).
 Failures always carry an `ErrorCode`: `too_large, provider_auth, rate_limited, timeout,
 action_missing, invalid_output, github_error, internal`.

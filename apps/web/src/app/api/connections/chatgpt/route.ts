@@ -1,15 +1,13 @@
 import { prisma } from '@app/db';
-import { DeleteChatGptConnectionResponse } from '@app/shared';
+import { DeleteChatGptConnectionResponse, GetChatGptConnectionResponse } from '@app/shared';
 import { json, route } from '@/lib/server/http';
 import { resolveCurrentOrgId } from '@/lib/server/org';
-import { GetChatGptConnectionResponse } from '@/lib/pending-contracts';
 import { requireOrgMember, requireSession } from '@/server/auth';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/connections/chatgpt — the current user's ChatGPT connection in the current org.
- * Pending contract (tasks/CONTRACT_REQUESTS.md); the schema lives in `@/lib/pending-contracts`.
  */
 export const GET = route(async (req) => {
   const session = await requireSession(req);

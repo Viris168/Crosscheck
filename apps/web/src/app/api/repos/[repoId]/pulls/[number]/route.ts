@@ -1,9 +1,8 @@
 import { prisma } from '@app/db';
-import { PullParams } from '@app/shared';
+import { GetPullResponse, PullParams } from '@app/shared';
 import { requirePullAccess } from '@/lib/server/access';
 import { json, route } from '@/lib/server/http';
 import { toPullHeader, toReviewDetail, toReviewSummary } from '@/lib/server/serialize';
-import { GetPullWithHistoryResponse } from '@/lib/pending-contracts';
 import { fetchPullFiles } from '@/lib/stubs';
 import { requireSession } from '@/server/auth';
 import { logger } from '@/server/logger';
@@ -31,7 +30,7 @@ export const GET = route<{ repoId: string; number: string }>(async (req, params)
     return [];
   });
 
-  return json(GetPullWithHistoryResponse, {
+  return json(GetPullResponse, {
     pull: toPullHeader(pull, repo),
     review: latest ? toReviewDetail(latest, pull.headSha) : null,
     files,

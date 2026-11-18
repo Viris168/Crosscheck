@@ -2,9 +2,10 @@
 
 import type { ReviewDetail } from '@app/shared/client';
 import { Alert } from '@/components/ui/alert';
-import { useRerunReview, useRetryReview } from '@/hooks/use-reviews';
+import { useCancelReview, useRerunReview, useRetryReview } from '@/hooks/use-reviews';
 import { ApiError } from '@/lib/api-client';
 import {
+  ReviewCancelled,
   ReviewCompleted,
   ReviewFailed,
   ReviewQueued,
@@ -27,12 +28,14 @@ export function ReviewPanel({
 }) {
   const retry = useRetryReview(ctx.repoId);
   const rerun = useRerunReview(ctx.repoId, ctx.prNumber);
+  const cancel = useCancelReview(ctx.repoId);
   const actions: ReviewActions = {
     onRetry: () => retry.mutate(review.id, { onSuccess: (r) => onStarted?.(r.reviewId) }),
+    onCancel: () => cancel.mutate(review.id),
     onRerun: (provider) => rerun.mutate(provider, { onSuccess: (r) => onStarted?.(r.reviewId) }),
-    pending: retry.isPending || rerun.isPending,
+    pending: retry.isPending || rerun.isPending || cancel.isPending,
   };
-  const error = retry.error ?? rerun.error;
+  const error = retry.error ?? rerun.error ?? cancel.error;
 
   return (
     <div className="flex flex-col gap-3">
@@ -57,7 +60,7 @@ export function ReviewState({
 }) {
   switch (review.status) {
     case 'queued':
-      return <ReviewQueued review={review} ctx={ctx} />;
+      return <ReviewQueued review={review} ctx={ctx} actions={actions} />;
     case 'running':
       return <ReviewRunning review={review} ctx={ctx} />;
     case 'waiting_action':
@@ -66,5 +69,7 @@ export function ReviewState({
       return <ReviewCompleted review={review} ctx={ctx} actions={actions} />;
     case 'failed':
       return <ReviewFailed review={review} ctx={ctx} actions={actions} />;
+    case 'cancelled':
+      return <ReviewCancelled review={review} ctx={ctx} actions={actions} />;
   }
 }
