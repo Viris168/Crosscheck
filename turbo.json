@@ -1,0 +1,55 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "globalDependencies": ["tsconfig.base.json", "eslint.config.mjs"],
+  "globalPassThroughEnv": [
+    "NODE_ENV",
+    "CI",
+    "PUBLIC_URL",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "BETTER_AUTH_SECRET",
+    "BETTER_AUTH_URL",
+    "GITHUB_APP_ID",
+    "GITHUB_APP_PRIVATE_KEY",
+    "GITHUB_WEBHOOK_SECRET",
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET",
+    "INNGEST_EVENT_KEY",
+    "INNGEST_SIGNING_KEY",
+    "INNGEST_BASE_URL",
+    "INNGEST_DEV",
+    "ENCRYPTION_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "CHATGPT_OAUTH_CLIENT_ID",
+    "CHATGPT_OAUTH_CLIENT_SECRET",
+    "SKIP_ENV_VALIDATION"
+  ],
+  "tasks": {
+    "db:generate": {
+      "inputs": ["prisma/schema.prisma"],
+      "outputs": []
+    },
+    "build": {
+      "dependsOn": ["^db:generate", "^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^db:generate", "db:generate"],
+      "outputs": []
+    },
+    "lint": {
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^db:generate", "db:generate"],
+      "outputs": []
+    },
+    "dev": {
+      "dependsOn": ["^db:generate"],
+      "cache": false,
+      "persistent": true
+    }
+  }
+}
