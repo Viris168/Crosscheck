@@ -1,0 +1,333 @@
+// Prisma schema for the AI Code Review Platform.
+//
+// Auth tables (User, Session, Account, Verification, Organization, Member, Invitation) follow the
+// Better Auth Prisma adapter + organization plugin schema. Our own fields are marked "ours".
+// Checked against better-auth 1.7.25 `getAuthTables()` (core + organization plugin + our
+// additionalFields). Re-check after upgrading better-auth (`npx @better-auth/cli generate`).
+//
+// Never store source code, patches, prompts or raw AI output here.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- enums (mirror @app/shared)
+
+enum ProviderId {
+  claude_action
+  codex_chatgpt
+  codex_action
+  platform
+}
+
+enum ReviewStatus {
+  queued
+  running
+  waiting_action
+  completed
+  failed
+}
+
+enum ErrorCode {
+  too_large
+  provider_auth
+  rate_limited
+  timeout
+  action_missing
+  invalid_output
+  github_error
+  internal
+}
+
+enum Severity {
+  low
+  medium
+  high
+  critical
+}
+
+enum Category {
+  security
+  bug
+  performance
+  style
+  test
+}
+
+enum RiskLevel {
+  low
+  medium
+  high
+  critical
+}
+
+enum PullRequestState {
+  open
+  closed
+  merged
+}
+
+// ---------------------------------------------------------------- Better Auth (core)
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // ours — set from the GitHub profile on sign-in (see apps/web/src/server/auth.ts)
+  login     String?
+  avatarUrl String?
+
+  sessions            Session[]
+  accounts            Account[]
+  members             Member[]
+  invitations         Invitation[]
+  providerCredentials ProviderCredential[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // organization plugin
+  activeOrganizationId String?
+
+  @@index([userId])
+  @@map("session")
+}
+
+/// GitHub user id = accountId where providerId = 'github'.
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ---------------------------------------------------------------- Better Auth (organization plugin)
+
+/// Our "Org".
+model Organization {
+  id        String   @id
+  name      String
+  slug      String   @unique
+  logo      String?
+  createdAt DateTime @default(now())
+  metadata  String?
+
+  // ours
+  githubAccountLogin String?
+  plan               String  @default("free")
+
+  members             Member[]
+  invitations         Invitation[]
+  installations       Installation[]
+  repos               Repo[]
+  providerCredentials ProviderCredential[]
+
+  @@map("organization")
+}
+
+/// Our "Membership". role: owner | admin | member.
+model Member {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String       @default("member")
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("member")
+}
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           String?
+  status         String       @default("pending")
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  inviterId      String
+  user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([email])
+  @@map("invitation")
+}
+
+// ---------------------------------------------------------------- ours
+
+model Installation {
+  id                   String       @id @default(cuid())
+  githubInstallationId Int          @unique
+  orgId                String
+  org                  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  repos Repo[]
+
+  @@index([orgId])
+}
+
+model Repo {
+  id              String       @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  installationId  String
+  installation    Installation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  githubRepoId    Int          @unique
+  fullName        String
+  provider        ProviderId   @default(platform)
+  /// RepoSettingsSchema from @app/shared
+  settings        Json         @default("{}")
+  /// sha256 hex of the ingest token (hashToken). The token itself is never stored.
+  ingestTokenHash String?      @unique
+  active          Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  pullRequests PullRequest[]
+
+  @@index([orgId])
+  @@index([installationId])
+  @@index([fullName])
+}
+
+model PullRequest {
+  id           String           @id @default(cuid())
+  repoId       String
+  repo         Repo             @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  number       Int
+  title        String
+  body         String?
+  author       String
+  state        PullRequestState @default(open)
+  headSha      String
+  baseRef      String
+  headRef      String
+  additions    Int              @default(0)
+  deletions    Int              @default(0)
+  changedFiles Int              @default(0)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  reviews Review[]
+
+  @@unique([repoId, number])
+  @@index([repoId, state])
+}
+
+model Review {
+  id             String       @id @default(cuid())
+  pullRequestId  String
+  pullRequest    PullRequest  @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  headSha        String
+  provider       ProviderId
+  status         ReviewStatus
+  errorCode      ErrorCode?
+  errorMessage   String?
+  filesTotal     Int          @default(0)
+  filesDone      Int          @default(0)
+  riskScore      Int?
+  riskLevel      RiskLevel?
+  /// RiskFactor[] from @app/shared
+  riskFactors    Json?
+  summary        String?
+  githubReviewId BigInt?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  issues Issue[]
+
+  @@unique([pullRequestId, headSha, provider])
+  @@index([pullRequestId, headSha])
+  @@index([status, updatedAt])
+  @@index([createdAt])
+}
+
+model Issue {
+  id              String   @id @default(cuid())
+  reviewId        String
+  review          Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  file            String
+  line            Int
+  severity        Severity
+  category        Category
+  title           String
+  explanation     String
+  suggestedFix    String?
+  posted          Boolean  @default(false)
+  githubCommentId BigInt?
+  createdAt       DateTime @default(now())
+
+  @@index([reviewId])
+}
+
+/// Sign in with ChatGPT tokens. Always encrypt() before writing; decrypt() only inside provider calls.
+model ProviderCredential {
+  id                    String       @id @default(cuid())
+  userId                String
+  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId                 String
+  org                   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  provider              ProviderId
+  encryptedToken        String
+  encryptedRefreshToken String?
+  expiresAt             DateTime?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@unique([orgId, userId, provider])
+  @@index([userId])
+}
