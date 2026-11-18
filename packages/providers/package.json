@@ -7,16 +7,22 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "lint": "eslint src",
+    "lint": "eslint src scripts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "try:platform": "tsx --env-file-if-exists=../../.env scripts/try-platform.ts"
   },
   "dependencies": {
-    "@app/shared": "workspace:*"
+    "@anthropic-ai/sdk": "~1.8.0",
+    "@app/db": "workspace:*",
+    "@app/shared": "workspace:*",
+    "openai": "^7.57.0",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "eslint": "catalog:",
+    "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
