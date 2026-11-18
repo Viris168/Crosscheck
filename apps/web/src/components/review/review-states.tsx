@@ -25,6 +25,7 @@ export interface ReviewContext {
 
 export interface ReviewActions {
   onRetry: () => void;
+  onCancel: () => void;
   onRerun: (provider?: ProviderId) => void;
   pending: boolean;
 }
@@ -36,7 +37,7 @@ interface StateProps {
 
 // ---------------------------------------------------------------- queued
 
-export function ReviewQueued({ review }: StateProps) {
+export function ReviewQueued({ review, actions }: StateProps & { actions: ReviewActions }) {
   return (
     <Card>
       <CardHeader>
@@ -48,13 +49,9 @@ export function ReviewQueued({ review }: StateProps) {
         Provider: <ProviderBadge provider={review.provider} />
       </CardContent>
       <CardFooter>
-        {/* Pending contract: POST /api/reviews/:id/cancel (tasks/CONTRACT_REQUESTS.md). */}
-        <Button variant="outline" disabled aria-describedby={`cancel-note-${review.id}`}>
+        <Button variant="outline" onClick={actions.onCancel} disabled={actions.pending}>
           Cancel
         </Button>
-        <span id={`cancel-note-${review.id}`} className="text-xs text-muted-foreground">
-          Cancelling a queued review isn&apos;t available yet.
-        </span>
       </CardFooter>
     </Card>
   );
@@ -286,6 +283,25 @@ function RerunWithOther({
 }
 
 // ---------------------------------------------------------------- failed
+
+export function ReviewCancelled({ review, actions }: StateProps & { actions: ReviewActions }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Review cancelled</CardTitle>
+      </CardHeader>
+      <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
+        Provider: <ProviderBadge provider={review.provider} />
+      </CardContent>
+      <CardFooter>
+        <Button onClick={() => actions.onRerun(review.provider)} disabled={actions.pending}>
+          <RotateCw aria-hidden /> Re-run
+        </Button>
+        <RerunWithOther current={review.provider} actions={actions} />
+      </CardFooter>
+    </Card>
+  );
+}
 
 export function ReviewFailed({ review, ctx, actions }: StateProps & { actions: ReviewActions }) {
   return (

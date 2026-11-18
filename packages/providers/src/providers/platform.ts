@@ -114,11 +114,13 @@ export function createPlatformProvider(deps: PlatformProviderDeps = {}): ReviewP
     runsInWorker: true,
     async reviewChunk(input: ReviewChunkInput, ctx: ProviderContext) {
       const env = deps.env ?? process.env;
-      let repoModel: string | undefined;
-      try {
-        repoModel = await lookup(ctx.orgId, input.repo);
-      } catch {
-        repoModel = undefined; // settings lookup is best-effort; fall back to env default
+      let repoModel = ctx.model;
+      if (repoModel === undefined) {
+        try {
+          repoModel = await lookup(ctx.orgId, input.repo);
+        } catch {
+          repoModel = undefined; // settings lookup is best-effort; fall back to env default
+        }
       }
 
       if (env.ANTHROPIC_API_KEY) {

@@ -74,14 +74,16 @@ shapes are **zod schemas shared** between client and server.
 | GET | `/api/repos` |
 | GET | `/api/repos/:repoId/pulls?state=open\|closed\|all` |
 | GET | `/api/repos/:repoId/pulls/:number` |
+| GET | `/api/reviews/:id` |
 | POST | `/api/reviews/:id/retry` |
+| POST | `/api/reviews/:id/cancel` (only `queued` / `waiting_action`) |
 | POST | `/api/repos/:repoId/pulls/:number/rerun` (body: `{ provider? }`) |
 | GET/PUT | `/api/repos/:repoId/settings` |
 | POST | `/api/repos/:repoId/ingest-token/rotate` |
 | POST | `/api/repos/:repoId/setup/workflow-pr` |
 | GET | `/api/orgs/:orgId/overview?range=30d\|90d` |
 | GET | `/api/oauth/chatgpt/start`, `/api/oauth/chatgpt/callback` |
-| DELETE | `/api/connections/chatgpt` |
+| GET/DELETE | `/api/connections/chatgpt` |
 | * | `/api/auth/*` (Better Auth handler) |
 
 ## Background jobs (Inngest)

@@ -136,9 +136,20 @@ describe('pulls API', () => {
         htmlUrl: 'https://github.com/a/b/pull/1',
       },
       review: reviewDetail,
+      reviews: [
+        {
+          id: 'rev',
+          status: 'cancelled',
+          provider: 'platform',
+          headSha: 'abc',
+          stale: false,
+          createdAt: now,
+        },
+      ],
       files: [{ path: 'a.ts', status: 'modified', additions: 1, deletions: 0, patch: '@@' }],
     });
     expect(detail.review?.issues[0]?.id).toBe('iss_1');
+    expect(detail.reviews[0]?.status).toBe('cancelled');
   });
 
   it('rerun provider is optional but must be known', () => {

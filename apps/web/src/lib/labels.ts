@@ -20,6 +20,7 @@ export const STATUS_LABEL: Record<ReviewStatus, string> = {
   waiting_action: 'Waiting for Action',
   completed: 'Completed',
   failed: 'Failed',
+  cancelled: 'Cancelled',
 };
 
 export const RISK_LABEL: Record<RiskLevel, string> = {

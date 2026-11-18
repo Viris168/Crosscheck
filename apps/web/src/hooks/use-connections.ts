@@ -1,9 +1,8 @@
 'use client';
 
-import { DeleteChatGptConnectionResponse } from '@app/shared/client';
+import { DeleteChatGptConnectionResponse, GetChatGptConnectionResponse } from '@app/shared/client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api-client';
-import { GetChatGptConnectionResponse } from '@/lib/pending-contracts';
 import { queryKeys } from '@/lib/query-keys';
 
 export function useChatGptConnection() {

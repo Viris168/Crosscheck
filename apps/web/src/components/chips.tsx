@@ -2,6 +2,7 @@ import type { ProviderId, ReviewStatus, RiskLevel, Severity } from '@app/shared/
 import {
   AlertOctagon,
   AlertTriangle,
+  Ban,
   CheckCircle2,
   Clock,
   GitBranch,
@@ -22,6 +23,7 @@ const STATUS_TONE: Record<ReviewStatus, BadgeTone> = {
   waiting_action: 'purple',
   completed: 'green',
   failed: 'red',
+  cancelled: 'neutral',
 };
 const STATUS_ICON = {
   queued: Clock,
@@ -29,6 +31,7 @@ const STATUS_ICON = {
   waiting_action: GitBranch,
   completed: CheckCircle2,
   failed: XCircle,
+  cancelled: Ban,
 } satisfies Record<ReviewStatus, unknown>;
 
 export function StatusChip({ status }: { status: ReviewStatus }) {

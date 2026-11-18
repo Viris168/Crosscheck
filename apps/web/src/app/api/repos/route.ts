@@ -1,8 +1,8 @@
 import { prisma } from '@app/db';
+import { ListReposResponse } from '@app/shared';
 import { json, route } from '@/lib/server/http';
 import { resolveCurrentOrgId } from '@/lib/server/org';
 import { toLatestReviewSummary } from '@/lib/server/serialize';
-import { ListReposWithLastReviewResponse } from '@/lib/pending-contracts';
 import { requireOrgMember, requireSession } from '@/server/auth';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export const GET = route(async (req) => {
   const session = await requireSession(req);
   const orgId = await resolveCurrentOrgId(session);
-  if (!orgId) return json(ListReposWithLastReviewResponse, []);
+  if (!orgId) return json(ListReposResponse, []);
   await requireOrgMember(session.user.id, orgId);
 
   const repos = await prisma.repo.findMany({
@@ -31,7 +31,7 @@ export const GET = route(async (req) => {
   });
 
   return json(
-    ListReposWithLastReviewResponse,
+    ListReposResponse,
     repos.map((r) => {
       const pull = r.pullRequests[0];
       return {

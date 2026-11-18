@@ -1,4 +1,5 @@
 import {
+  CancelReviewResponse,
   ApiErrorSchema,
   GetPullResponse,
   GetRepoSettingsResponse,
@@ -14,7 +15,6 @@ import {
 } from '@app/shared';
 import type * as DbModule from '@app/db';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { GetPullWithHistoryResponse } from '@/lib/pending-contracts';
 
 // ---------------------------------------------------------------- mocks
 
@@ -75,6 +75,7 @@ const { GET: getPull } = await import('./repos/[repoId]/pulls/[number]/route');
 const { POST: rerun } = await import('./repos/[repoId]/pulls/[number]/rerun/route');
 const { GET: getReview } = await import('./reviews/[id]/route');
 const { POST: retry } = await import('./reviews/[id]/retry/route');
+const { POST: cancel } = await import('./reviews/[id]/cancel/route');
 const { GET: getSettings, PUT: putSettings } = await import('./repos/[repoId]/settings/route');
 const { POST: rotate } = await import('./repos/[repoId]/ingest-token/rotate/route');
 const { POST: workflowPr } = await import('./repos/[repoId]/setup/workflow-pr/route');
@@ -171,6 +172,7 @@ describe('session and membership', () => {
     ['POST rerun', () => rerun(req('/x', { method: 'POST' }), ctx({ repoId: 'r1', number: '42' }))],
     ['GET review', () => getReview(req('/x'), ctx({ id: 'rev1' }))],
     ['POST retry', () => retry(req('/x', { method: 'POST' }), ctx({ id: 'rev1' }))],
+    ['POST cancel', () => cancel(req('/x', { method: 'POST' }), ctx({ id: 'rev1' }))],
     ['GET settings', () => getSettings(req('/x'), ctx({ repoId: 'r1' }))],
     ['POST rotate', () => rotate(req('/x', { method: 'POST' }), ctx({ repoId: 'r1' }))],
     ['GET overview', () => overview(req('/x'), ctx({ orgId: 'org1' }))],
@@ -304,7 +306,7 @@ describe('GET /api/repos/:repoId/pulls/:number', () => {
       factors: [{ key: 'ai', label: 'AI', points: 40 }],
     });
     expect(shared.review?.issues[0]).not.toHaveProperty('suggested_fix');
-    expect(GetPullWithHistoryResponse.parse(body).reviews).toHaveLength(1);
+    expect(GetPullResponse.parse(body).reviews).toHaveLength(1);
   });
 });
 
@@ -379,6 +381,39 @@ describe('POST /api/reviews/:id/retry', () => {
       where: { id: 'rev1' },
       data: expect.objectContaining({ status: 'failed', errorCode: 'internal' }),
     });
+  });
+});
+
+describe('POST /api/reviews/:id/cancel', () => {
+  it('cancels a queued review atomically and sends no event', async () => {
+    db.review.findUnique.mockResolvedValue({
+      ...baseReview,
+      status: 'queued',
+      pullRequest: { ...pull, repo },
+    });
+    db.review.updateMany.mockResolvedValue({ count: 1 });
+    const res = await cancel(req('/x', { method: 'POST' }), ctx({ id: 'rev1' }));
+    expect(res.status).toBe(200);
+    expect(CancelReviewResponse.parse(await res.json())).toEqual({
+      reviewId: 'rev1',
+      status: 'cancelled',
+    });
+    expect(db.review.updateMany.mock.calls[0]?.[0]).toMatchObject({
+      where: { id: 'rev1', status: { in: ['queued', 'waiting_action'] } },
+      data: { status: 'cancelled' },
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('409 when the review already started or finished', async () => {
+    db.review.findUnique.mockResolvedValue({
+      ...baseReview,
+      status: 'running',
+      pullRequest: { ...pull, repo },
+    });
+    db.review.updateMany.mockResolvedValue({ count: 0 });
+    const res = await cancel(req('/x', { method: 'POST' }), ctx({ id: 'rev1' }));
+    expect(res.status).toBe(409);
   });
 });
 

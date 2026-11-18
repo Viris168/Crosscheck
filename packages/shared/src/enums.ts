@@ -1,7 +1,15 @@
 export const ProviderId = ['claude_action', 'codex_chatgpt', 'codex_action', 'platform'] as const;
 export type ProviderId = (typeof ProviderId)[number];
 
-export const ReviewStatus = ['queued', 'running', 'waiting_action', 'completed', 'failed'] as const;
+export const ReviewStatus = [
+  'queued',
+  'running',
+  'waiting_action',
+  'completed',
+  'failed',
+  /** Stopped by a user before it ran (from `queued` or `waiting_action`). Terminal. */
+  'cancelled',
+] as const;
 export type ReviewStatus = (typeof ReviewStatus)[number];
 
 /** Why a review failed (or a warning on a completed review, e.g. `too_large`). */

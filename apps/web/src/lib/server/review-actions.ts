@@ -57,6 +57,25 @@ async function enqueue(reviewId: string, orgId: string, provider: ProviderId): P
   }
 }
 
+/** States a user can cancel from: the review hasn't started running yet. */
+export const CANCELLABLE: readonly ReviewStatus[] = ['queued', 'waiting_action'];
+
+/**
+ * POST /api/reviews/:id/cancel — atomic: 409 if the review already started or finished.
+ * `review-start` re-reads the status first, so a queued Inngest event becomes a no-op.
+ */
+export async function cancelReview(
+  review: Pick<Review, 'id'>,
+): Promise<{ reviewId: string; status: ReviewStatus }> {
+  const { count } = await prisma.review.updateMany({
+    where: { id: review.id, status: { in: [...CANCELLABLE] } },
+    data: { status: 'cancelled', finishedAt: new Date() },
+  });
+  if (count === 0) throw new HttpError('conflict', 'Only queued reviews can be cancelled');
+  logger.info({ reviewId: review.id }, 'review cancelled');
+  return { reviewId: review.id, status: 'cancelled' };
+}
+
 /** POST /api/reviews/:id/retry — only failed reviews can be retried. */
 export async function retryReview(
   review: Review,

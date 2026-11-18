@@ -32,14 +32,29 @@ function review(over: Partial<ReviewDetail> = {}): ReviewDetail {
   });
 }
 
-const actions = (): ReviewActions => ({ onRetry: vi.fn(), onRerun: vi.fn(), pending: false });
+const actions = (): ReviewActions => ({
+  onRetry: vi.fn(),
+  onCancel: vi.fn(),
+  onRerun: vi.fn(),
+  pending: false,
+});
 
 describe('review states', () => {
-  it('queued: waiting to start, provider, cancel (disabled until the contract lands)', () => {
-    render(<ReviewState review={review({ status: 'queued' })} ctx={ctx} actions={actions()} />);
+  it('queued: waiting to start, provider, cancel', async () => {
+    const a = actions();
+    render(<ReviewState review={review({ status: 'queued' })} ctx={ctx} actions={a} />);
     expect(screen.getByText('Waiting to start')).toBeTruthy();
     expect(screen.getByText('Platform')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(a.onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('cancelled: shows the state and offers re-run with the same provider', async () => {
+    const a = actions();
+    render(<ReviewState review={review({ status: 'cancelled' })} ctx={ctx} actions={a} />);
+    expect(screen.getByText('Review cancelled')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Re-run' }));
+    expect(a.onRerun).toHaveBeenCalledWith('platform');
   });
 
   it('running: progress X of Y and elapsed time', () => {

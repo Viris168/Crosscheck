@@ -1,5 +1,7 @@
 'use client';
 
+import type { GetPullResponse } from '@app/shared/client';
+import type { z } from 'zod';
 import { ExternalLink, GitPullRequest } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -14,7 +16,6 @@ import { LoadingState } from '@/components/ui/skeleton';
 import { usePull } from '@/hooks/use-pulls';
 import { useRerunReview, useReview } from '@/hooks/use-reviews';
 import { shortSha } from '@/lib/labels';
-import type { PullDetailData } from '@/lib/pending-contracts';
 import { cn } from '@/lib/utils';
 
 export function PullDetail({ repoId, number }: { repoId: string; number: number }) {
@@ -23,6 +24,8 @@ export function PullDetail({ repoId, number }: { repoId: string; number: number 
   if (error) return <QueryError error={error} what="pull request" />;
   return <PullDetailView data={data} repoId={repoId} />;
 }
+
+type PullDetailData = z.infer<typeof GetPullResponse>;
 
 function PullDetailView({ data, repoId }: { data: PullDetailData; repoId: string }) {
   const { pull, files, reviews } = data;

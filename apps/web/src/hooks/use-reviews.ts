@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  CancelReviewResponse,
   RerunResponse,
   RetryReviewResponse,
   ReviewDetailSchema,
@@ -33,6 +34,17 @@ export function useRetryReview(repoId: string) {
   return useMutation({
     mutationFn: (reviewId: string) =>
       apiFetch(`/api/reviews/${encodeURIComponent(reviewId)}/retry`, RetryReviewResponse, {
+        method: 'POST',
+      }),
+    onSuccess: () => invalidateRepo(qc, repoId),
+  });
+}
+
+export function useCancelReview(repoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reviewId: string) =>
+      apiFetch(`/api/reviews/${encodeURIComponent(reviewId)}/cancel`, CancelReviewResponse, {
         method: 'POST',
       }),
     onSuccess: () => invalidateRepo(qc, repoId),

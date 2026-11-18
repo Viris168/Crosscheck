@@ -62,6 +62,13 @@ const reviews: Record<ReviewStatus, Omit<Prisma.ReviewUncheckedCreateInput, 'pul
     errorMessage: 'No result received from the GitHub Action within 30 minutes.',
     finishedAt: new Date(),
   },
+  cancelled: {
+    id: 'seed_review_cancelled',
+    headSha: OLD_HEAD,
+    provider: 'codex_chatgpt',
+    status: 'cancelled',
+    finishedAt: new Date(Date.now() - 10 * 60_000),
+  },
 };
 
 async function main() {

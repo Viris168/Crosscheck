@@ -1,6 +1,6 @@
 'use client';
 
-import { isActionProvider } from '@app/shared/client';
+import { isActionProvider, type RepoListItem } from '@app/shared/client';
 import { Settings2 } from 'lucide-react';
 import Link from 'next/link';
 import { ProviderBadge, StaleBadge, StatusChip } from '@/components/chips';
@@ -8,7 +8,6 @@ import { QueryError } from '@/components/query-error';
 import { buttonVariants } from '@/components/ui/button';
 import { LoadingState } from '@/components/ui/skeleton';
 import { useRepos } from '@/hooks/use-repos';
-import type { RepoListItem } from '@/lib/pending-contracts';
 
 /** Action providers need the ingest token (and workflow) before they can deliver results. */
 export function needsSetup(repo: Pick<RepoListItem, 'provider' | 'hasIngestToken'>): boolean {

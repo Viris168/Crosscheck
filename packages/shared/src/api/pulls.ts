@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { ProviderId, PullRequestState, ReviewStatus } from '../enums';
 import { RiskLevel } from '../risk';
 import { Id, IsoDate } from './common';
-import { ReviewDetailSchema } from './reviews';
+import { ReviewDetailSchema, ReviewSummarySchema } from './reviews';
 
 export const PullParams = z.object({
   repoId: Id,
@@ -66,10 +66,12 @@ export const ChangedFileSchema = z.object({
   patch: z.string().nullish(),
 });
 
-/** GET /api/repos/:repoId/pulls/:number — PR header + latest ReviewDetail + changed files. */
+/** GET /api/repos/:repoId/pulls/:number — PR header + latest ReviewDetail + review history + changed files. */
 export const GetPullResponse = z.object({
   pull: PullHeaderSchema,
   review: ReviewDetailSchema.nullable(),
+  /** Every review of this PR, newest first. Open one with GET /api/reviews/:id. */
+  reviews: z.array(ReviewSummarySchema),
   files: z.array(ChangedFileSchema),
 });
 

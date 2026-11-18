@@ -34,6 +34,8 @@ export interface ReviewChunkResult {
 export interface ProviderContext {
   orgId: string;
   userId?: string;
+  /** `repo.settings.model`, if set. Providers fall back to their env/default model. */
+  model?: string;
 }
 
 export interface ReviewProvider {

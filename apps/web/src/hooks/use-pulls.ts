@@ -1,9 +1,8 @@
 'use client';
 
-import { ListPullsResponse } from '@app/shared/client';
+import { GetPullResponse, ListPullsResponse } from '@app/shared/client';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api-client';
-import { GetPullWithHistoryResponse } from '@/lib/pending-contracts';
 import { queryKeys } from '@/lib/query-keys';
 import { isActiveStatus, POLL_MS } from '@/lib/review-status';
 
@@ -22,10 +21,7 @@ export function usePull(repoId: string, number: number) {
   return useQuery({
     queryKey: queryKeys.pull(repoId, number),
     queryFn: () =>
-      apiFetch(
-        `/api/repos/${encodeURIComponent(repoId)}/pulls/${number}`,
-        GetPullWithHistoryResponse,
-      ),
+      apiFetch(`/api/repos/${encodeURIComponent(repoId)}/pulls/${number}`, GetPullResponse),
     refetchInterval: (q) => (isActiveStatus(q.state.data?.review?.status) ? POLL_MS : false),
   });
 }
