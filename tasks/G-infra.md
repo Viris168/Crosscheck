@@ -6,6 +6,24 @@
 One-command production deploy on a single VPS with Docker + automatic HTTPS, CI on every PR, backups,
 and basic monitoring.
 
+## Scope now: free local demo (no VPS)
+This project is currently a **demo with a $0 budget**. There is no VPS, no domain and no paid service.
+The demo runs on the developer's laptop. So:
+- **Build and test everything locally:** Dockerfile, `infra/compose.prod.yml` in `localhost` Caddy mode,
+  scripts, CI. Keep the VPS design below intact so it can be deployed later without rework.
+- **CI (`ci.yml`) must run with no secrets** and stay inside GitHub's free tier (public repo).
+- **`deploy.yml` must never fail or run on its own:** trigger it with `workflow_dispatch` only, and skip
+  with a clear message when `VPS_HOST` is not set. No automatic deploy on push to `main`.
+- **Don't** buy, sign up for, or depend on anything paid (hosting, domains, Sentry, S3, uptime services).
+  Optional extras stay documented placeholders.
+- **`docs/deploy.md` starts with a "Local demo" section:** `docker-compose.dev.yml` + `pnpm dev`, a free
+  smee.io channel for GitHub webhooks, an optional free Cloudflare quick tunnel
+  (`cloudflared tunnel --url http://localhost:3000`) to share a temporary public link, and free reviewer
+  choices (Claude Action on the user's own Claude plan, in a public repo where Actions are free). Note
+  that the platform-default reviewer uses `ANTHROPIC_API_KEY`, which is paid per review.
+- The VPS guide follows as "Later: deploy to a VPS". Mention Oracle Cloud Always Free as a $0 VM option
+  (ARM: the image must build for `linux/arm64`, so make the Dockerfile multi-arch friendly).
+
 ## You own
 `infra/`, `.github/workflows/`, `docs/deploy.md`
 
@@ -64,7 +82,9 @@ URL for Better Auth login `https://DOMAIN/api/auth/callback/github`) → generat
 `INNGEST_BASE_URL=http://inngest:8288`) → first deploy → verify (incl. Inngest dashboard via SSH tunnel).
 
 ## Done when
-- [ ] `docker compose -f infra/compose.prod.yml up` works locally with a test domain (or `localhost` Caddy mode)
-- [ ] CI passes on a sample PR
-- [ ] Deploy to a real VPS succeeds; HTTPS valid; GitHub webhook delivery shows 200
-- [ ] Backup + restore tested once and documented
+- [ ] `docker compose -f infra/compose.prod.yml up` works locally in `localhost` Caddy mode (`/api/health` 200)
+- [ ] CI passes on a sample PR with no repo secrets set
+- [ ] `deploy.yml` is manual-only and skips cleanly when `VPS_HOST` is not set
+- [ ] Backup + restore tested once locally and documented
+- [ ] `docs/deploy.md`: "Local demo" section first, then "Later: deploy to a VPS"
+- [ ] ~~Deploy to a real VPS~~ — deferred (no budget); the steps are documented, not executed
