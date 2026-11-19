@@ -1,9 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { events, eventSchemas, ReviewFinalizeEvent, ReviewRequestedEvent } from './events';
+import {
+  events,
+  eventSchemas,
+  ReviewFinalizeEvent,
+  ReviewRequestedEvent,
+  UserSignedInEvent,
+} from './events';
 
 describe('events', () => {
-  it('defines exactly the two review events', () => {
-    expect(Object.keys(events).sort()).toEqual(['review/finalize', 'review/requested']);
+  it('defines exactly the review and sign-in events', () => {
+    expect(Object.keys(events).sort()).toEqual([
+      'review/finalize',
+      'review/requested',
+      'user/signed-in',
+    ]);
+  });
+
+  it('user/signed-in needs a userId and carries ids only', () => {
+    expect(UserSignedInEvent.parse({ userId: 'u1', token: 'gho_x' })).toEqual({ userId: 'u1' });
+    expect(UserSignedInEvent.safeParse({}).success).toBe(false);
+    expect(UserSignedInEvent.safeParse({ userId: '' }).success).toBe(false);
   });
 
   it('review/requested needs reviewId + orgId', () => {
@@ -27,5 +43,6 @@ describe('eventSchemas', () => {
     expect(Object.keys(eventSchemas).sort()).toEqual(Object.keys(events).sort());
     expect(eventSchemas['review/requested']).toBe(events['review/requested'].data);
     expect(eventSchemas['review/finalize']).toBe(events['review/finalize'].data);
+    expect(eventSchemas['user/signed-in']).toBe(events['user/signed-in'].data);
   });
 });

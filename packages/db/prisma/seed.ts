@@ -94,6 +94,7 @@ async function main() {
       name: 'Acme',
       slug: 'acme',
       githubAccountLogin: 'acme',
+      githubAccountType: 'Organization',
       plan: 'free',
       members: { create: { id: IDS.member, userId: IDS.user, role: 'owner' } },
       installations: { create: { id: IDS.installation, githubInstallationId: 1000001 } },

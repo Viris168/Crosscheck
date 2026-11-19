@@ -161,6 +161,8 @@ model Organization {
 
   // ours
   githubAccountLogin String?
+  /// GitHub account type of the installation: 'Organization' | 'User'. Null for orgs created before task H.
+  githubAccountType  String?
   plan               String  @default("free")
 
   members             Member[]
@@ -207,12 +209,14 @@ model Invitation {
 // ---------------------------------------------------------------- ours
 
 model Installation {
-  id                   String       @id @default(cuid())
-  githubInstallationId Int          @unique
-  orgId                String
-  org                  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  id                    String       @id @default(cuid())
+  githubInstallationId  Int          @unique
+  orgId                 String
+  org                   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  /// true after GitHub answered 403 on the org members API (Members: read not accepted yet).
+  needsMemberPermission Boolean      @default(false)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
 
   repos Repo[]
 

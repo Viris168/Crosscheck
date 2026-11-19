@@ -127,3 +127,39 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Why:** prod needs two infra-only vars that aren't in `.env.example`; avoids people hunting for them.
 - **Workaround in use:** `infra/env.prod.example` + `docs/deploy.md` §5.
 - **Status:** open
+
+### [Task H] Event `user/signed-in`
+- **Change:** `'user/signed-in': { userId: string }` in `events` and `eventSchemas` (`packages/shared/src/events.ts`).
+- **Why:** the sign-in hook triggers the membership sync job (H5a).
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/h0-contracts)
+
+### [Task H] `Organization.githubAccountType` + `Installation.needsMemberPermission`
+- **Change:** `githubAccountType String?` on `Organization` (also a Better Auth org `additionalFields` entry,
+  `input: false`); `needsMemberPermission Boolean @default(false)` on `Installation`. Migration
+  `h_members_from_github`. Seed org gets `githubAccountType: 'Organization'`.
+- **Why:** membership sync needs the install type; the Members page shows the "accept permissions" banner.
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/h0-contracts)
+
+### [Task H] Members API schemas
+- **Change:** `MemberParams`, `OrgMemberSchema`, `ListMembersResponse`, `UpdateMemberBody`,
+  `UpdateMemberResponse`, `SyncOrgsResponse` in `packages/shared/src/api/orgs.ts`.
+- **Why:** Members page (H4) and `POST /api/me/sync-orgs` (H5b).
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/h0-contracts)
+
+### [Task H] `canEdit` on the repo settings GET response
+- **Change:** `canEdit: z.boolean().default(false)` on `GetRepoSettingsResponse` (`api/repos.ts`). The default
+  keeps today's handler compiling and fails closed in the UI until H3 sets it.
+- **Why:** the settings page disables edit controls for read-only collaborators (H3).
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/h0-contracts)
+
+### [Task H] Better Auth hardening + sign-in hook (`apps/web/src/server/auth.ts`)
+- **Change:** `databaseHooks.session.create.after` sends `user/signed-in` (lazy import, never throws);
+  `overrideUserInfoOnSignIn: true`; `allowUserToCreateOrganization: false`; `disabledPaths` for every
+  org/member/invitation/team/role mutation (keeps `set-active` and reads); `account.encryptOAuthTokens: true`.
+- **Why:** GitHub is the only source of members.
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/h0-contracts)
