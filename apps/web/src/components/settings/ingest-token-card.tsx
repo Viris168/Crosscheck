@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { CopyButton } from '@/components/ui/copy-button';
 import { useRotateIngestToken } from '@/hooks/use-repos';
 
+const READ_ONLY_HINT = 'You need write access to this repository on GitHub.';
+
 /**
  * Generates / rotates the repo's ingest token. The plain token exists only in this component's
  * state after the mutation — it is shown once and never refetched.
@@ -14,9 +16,12 @@ import { useRotateIngestToken } from '@/hooks/use-repos';
 export function IngestTokenControl({
   repoId,
   hasIngestToken,
+  canEdit = true,
 }: {
   repoId: string;
   hasIngestToken: boolean;
+  /** false disables rotation (no GitHub `write` on the repo). The server enforces it either way. */
+  canEdit?: boolean;
 }) {
   const rotate = useRotateIngestToken(repoId);
   const [token, setToken] = useState<string | null>(null);
@@ -74,15 +79,22 @@ export function IngestTokenControl({
           </Button>
         </div>
       ) : (
-        <div>
-          <Button
-            variant={hasIngestToken || token ? 'outline' : 'default'}
-            size="sm"
-            disabled={rotate.isPending}
-            onClick={() => (hasIngestToken && !token ? setConfirming(true) : run())}
-          >
-            {hasIngestToken || token ? 'Rotate token' : 'Generate token'}
-          </Button>
+        <div className="flex flex-col items-start gap-1">
+          <span title={canEdit ? undefined : READ_ONLY_HINT}>
+            <Button
+              variant={hasIngestToken || token ? 'outline' : 'default'}
+              size="sm"
+              disabled={!canEdit || rotate.isPending}
+              onClick={() => (hasIngestToken && !token ? setConfirming(true) : run())}
+            >
+              {hasIngestToken || token ? 'Rotate token' : 'Generate token'}
+            </Button>
+          </span>
+          {!canEdit && (
+            <p role="note" className="text-xs text-muted-foreground">
+              {READ_ONLY_HINT}
+            </p>
+          )}
         </div>
       )}
       {rotate.error && <Alert tone="error">{rotate.error.message}</Alert>}

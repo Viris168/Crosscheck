@@ -10,9 +10,13 @@ const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 const avg = (xs: number[]) =>
   xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null;
 
-/** GET /api/orgs/:orgId/overview — aggregates for the org dashboard. */
+/**
+ * GET /api/orgs/:orgId/overview — aggregates for the org dashboard, over `repoIds` only (the repos
+ * the caller may see, from `visibleRepoIds`). Ids outside the org are ignored.
+ */
 export async function buildOverview(
   orgId: string,
+  repoIds: readonly string[],
   range: '30d' | '90d',
   now = new Date(),
 ): Promise<Overview> {
@@ -20,13 +24,14 @@ export async function buildOverview(
   // Day buckets are UTC; the range covers `days` calendar days ending today.
   const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   const since = new Date(todayStart - (days - 1) * DAY_MS);
-  const inOrg = { pullRequest: { repo: { orgId } } };
+  const inRepos = { orgId, id: { in: [...repoIds] } };
+  const inOrg = { pullRequest: { repo: inRepos } };
   const inRange = { ...inOrg, createdAt: { gte: since } };
 
   const [repos, openPulls, reviews, byCategory, bySeverity] = await Promise.all([
-    prisma.repo.count({ where: { orgId } }),
+    prisma.repo.count({ where: inRepos }),
     prisma.pullRequest.findMany({
-      where: { state: 'open', repo: { orgId } },
+      where: { state: 'open', repo: inRepos },
       select: {
         // Latest review that produced a risk level.
         reviews: {

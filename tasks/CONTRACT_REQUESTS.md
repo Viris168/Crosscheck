@@ -163,3 +163,11 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Why:** GitHub is the only source of members.
 - **Workaround in use:** none.
 - **Status:** applied (PR feat/h0-contracts)
+
+### [Task H3] `github_error` as a REST `ApiErrorCode` (502)
+- **Change:** add `'github_error'` to `ApiErrorCode` with `API_ERROR_STATUS.github_error = 502`
+  (`packages/shared/src/api/errors.ts`).
+- **Why:** H-spec Part 5.1 says a GitHub error on a single-repo access check returns 502 `github_error`.
+- **Workaround in use:** `apps/web/src/lib/server/access.ts` throws
+  `new HttpError('github_error' as ApiErrorCode, …, 502)`; drop the cast once this lands.
+- **Status:** requested (PR feat/h3-repo-access)

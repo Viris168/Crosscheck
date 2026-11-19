@@ -37,6 +37,7 @@ const db = vi.hoisted(() => {
     },
     issue: { findMany: fn(), deleteMany: fn(), groupBy: fn() },
     member: { findMany: fn() },
+    user: { findUnique: fn() },
     installation: { findUnique: fn() },
     providerCredential: { findUnique: fn(), deleteMany: fn(), upsert: fn() },
     $transaction: vi.fn(),
@@ -91,6 +92,12 @@ vi.mock('@app/github', async () => ({
     return { owner, repo };
   },
 }));
+const perm = vi.hoisted(() => ({ getRepoPermission: vi.fn() }));
+vi.mock('@/server/github', async () => ({
+  getRepoPermission: perm.getRepoPermission,
+  permissionAtLeast: (await vi.importActual<typeof GithubModule>('@app/github')).permissionAtLeast,
+}));
+
 vi.mock('@app/workflow-templates', () => ({
   openWorkflowPR: gh.openWorkflowPR,
   renderWorkflow: gh.renderWorkflow,
@@ -118,6 +125,7 @@ const repo = {
   id: 'r1',
   orgId: 'org1',
   installationId: 'inst1',
+  installation: { id: 'inst1', githubInstallationId: 7 },
   githubRepoId: 1,
   fullName: 'acme/web',
   provider: 'platform',
@@ -187,6 +195,8 @@ beforeEach(() => {
     })),
   );
   db.pullRequest.findUnique.mockResolvedValue(pull);
+  db.user.findUnique.mockResolvedValue({ login: 'octo' });
+  perm.getRepoPermission.mockResolvedValue('read');
   db.$transaction.mockImplementation(async (fn: (tx: typeof db) => unknown) => fn(db));
   send.mockResolvedValue({ ids: ['e1'] });
 });
@@ -248,9 +258,239 @@ describe('session and membership', () => {
     db.repo.findMany.mockResolvedValue([{ ...repo, pullRequests: [] }]);
     const res = await listRepos(req('/api/repos'), ctx({}));
     expect(res.status).toBe(200);
-    expect(db.repo.findMany.mock.calls[0]?.[0].where).toEqual({ orgId: 'org1' });
+    for (const [args] of db.repo.findMany.mock.calls) expect(args.where.orgId).toBe('org1');
+    expect(db.repo.findMany.mock.calls.at(-1)?.[0].where).toEqual({
+      orgId: 'org1',
+      id: { in: ['r1'] },
+    });
     const body = await res.json();
     expect(ListReposResponse.parse(body)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------- repo access from GitHub
+
+describe('requireRepoAccess (read)', () => {
+  const view = () => listPulls(req('/api/repos/r1/pulls'), ctx({ repoId: 'r1' }));
+  beforeEach(() => db.pullRequest.findMany.mockResolvedValue([]));
+
+  it.each(['owner', 'admin'] as const)('%s passes without a GitHub call', async (role) => {
+    memberships.get('u1')!.set('org1', role);
+    expect((await view()).status).toBe(200);
+    expect(perm.getRepoPermission).not.toHaveBeenCalled();
+  });
+
+  it.each(['read', 'triage', 'write', 'admin'] as const)(
+    'member with GitHub %s is allowed',
+    async (permission) => {
+      perm.getRepoPermission.mockResolvedValue(permission);
+      expect((await view()).status).toBe(200);
+    },
+  );
+
+  it("member with 'none' gets 403", async () => {
+    perm.getRepoPermission.mockResolvedValue('none');
+    const res = await view();
+    expect(res.status).toBe(403);
+    expect(ApiErrorSchema.parse(await res.json()).error.message).toBe(
+      'No access to this repository on GitHub',
+    );
+    expect(db.pullRequest.findMany).not.toHaveBeenCalled();
+  });
+
+  it('member without a GitHub login gets 403 without a GitHub call', async () => {
+    db.user.findUnique.mockResolvedValue({ login: null });
+    const res = await view();
+    expect(res.status).toBe(403);
+    expect(ApiErrorSchema.parse(await res.json()).error.message).toBe('Link your GitHub account');
+    expect(perm.getRepoPermission).not.toHaveBeenCalled();
+  });
+
+  it('a GitHub error gives 502 github_error (fail closed)', async () => {
+    perm.getRepoPermission.mockRejectedValue(new Error('500'));
+    const res = await view();
+    expect(res.status).toBe(502);
+    expect(await errCode(res)).toBe('github_error');
+    expect(db.pullRequest.findMany).not.toHaveBeenCalled();
+  });
+
+  it("reviews go through the repo's GitHub check (retry with 'none' → 403)", async () => {
+    perm.getRepoPermission.mockResolvedValue('none');
+    db.review.findUnique.mockResolvedValue({
+      ...baseReview,
+      status: 'failed',
+      pullRequest: { ...pull, repo },
+    });
+    expect((await getReview(req('/x'), ctx({ id: 'rev1' }))).status).toBe(403);
+    expect((await retry(req('/x', { method: 'POST' }), ctx({ id: 'rev1' }))).status).toBe(403);
+    expect((await cancel(req('/x', { method: 'POST' }), ctx({ id: 'rev1' }))).status).toBe(403);
+    expect(db.review.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("pulls and rerun go through the repo's GitHub check ('none' → 403)", async () => {
+    perm.getRepoPermission.mockResolvedValue('none');
+    expect((await getPull(req('/x'), ctx({ repoId: 'r1', number: '42' }))).status).toBe(403);
+    const res = await rerun(req('/x', { method: 'POST' }), ctx({ repoId: 'r1', number: '42' }));
+    expect(res.status).toBe(403);
+    expect(db.review.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('requireRepoWrite', () => {
+  const rotateR1 = () => rotate(req('/x', { method: 'POST' }), ctx({ repoId: 'r1' }));
+
+  it.each(['owner', 'admin'] as const)('%s is allowed without a GitHub call', async (role) => {
+    memberships.get('u1')!.set('org1', role);
+    expect((await rotateR1()).status).toBe(200);
+    expect(perm.getRepoPermission).not.toHaveBeenCalled();
+  });
+
+  it.each(['write', 'maintain', 'admin'] as const)(
+    'member with GitHub %s is allowed',
+    async (permission) => {
+      perm.getRepoPermission.mockResolvedValue(permission);
+      expect((await rotateR1()).status).toBe(200);
+    },
+  );
+
+  it.each(['read', 'triage', 'none'] as const)('member with GitHub %s gets 403', async (p) => {
+    perm.getRepoPermission.mockResolvedValue(p);
+    const res = await rotateR1();
+    expect(res.status).toBe(403);
+    expect(db.repo.update).not.toHaveBeenCalled();
+  });
+
+  it('member without a GitHub login gets 403', async () => {
+    db.user.findUnique.mockResolvedValue({ login: null });
+    const res = await rotateR1();
+    expect(res.status).toBe(403);
+    expect(ApiErrorSchema.parse(await res.json()).error.message).toBe('Link your GitHub account');
+  });
+
+  it('a user outside the org gets 403 without a GitHub call', async () => {
+    memberships.clear();
+    expect((await rotateR1()).status).toBe(403);
+    expect(perm.getRepoPermission).not.toHaveBeenCalled();
+  });
+
+  it('a GitHub 500 gives 502', async () => {
+    perm.getRepoPermission.mockRejectedValue(new Error('500'));
+    const res = await rotateR1();
+    expect(res.status).toBe(502);
+    expect(await errCode(res)).toBe('github_error');
+    expect(db.repo.update).not.toHaveBeenCalled();
+  });
+
+  it('workflow PR: a member with read gets 403; with write it opens the PR', async () => {
+    const open = () =>
+      workflowPr(
+        req('/x', { method: 'POST', body: JSON.stringify({ provider: 'claude_action' }) }),
+        ctx({ repoId: 'r1' }),
+      );
+    expect((await open()).status).toBe(403);
+    expect(gh.openWorkflowPR).not.toHaveBeenCalled();
+
+    perm.getRepoPermission.mockResolvedValue('write');
+    gh.getInstallationOctokit.mockResolvedValue(gh.octokit);
+    gh.renderWorkflow.mockReturnValue('name: ai-review');
+    gh.openWorkflowPR.mockResolvedValue({
+      prNumber: 5,
+      prUrl: 'https://github.com/acme/web/pull/5',
+    });
+    expect((await open()).status).toBe(201);
+  });
+
+  it('merge: a member with write on GitHub can merge', async () => {
+    perm.getRepoPermission.mockResolvedValue('write');
+    db.review.findFirst.mockResolvedValue({ ...baseReview, headSha: 'head2' });
+    db.installation.findUnique.mockResolvedValue({ id: 'inst1', githubInstallationId: 7 });
+    gh.getInstallationOctokit.mockResolvedValue(gh.octokit);
+    gh.mergePullRequest.mockResolvedValue({ sha: 'mergeSha' });
+    const res = await merge(req('/x', { method: 'POST' }), ctx({ repoId: 'r1', number: '42' }));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('lists only show repos the member can read on GitHub', () => {
+  const hidden = { ...repo, id: 'r3', githubRepoId: 3, fullName: 'acme/secret' };
+  const broken = { ...repo, id: 'r4', githubRepoId: 4, fullName: 'acme/flaky' };
+  beforeEach(() => {
+    db.repo.findMany.mockImplementation(async (args: { include?: object }) =>
+      args.include && 'installation' in args.include
+        ? [repo, hidden, broken]
+        : [{ ...repo, pullRequests: [] }],
+    );
+    perm.getRepoPermission.mockImplementation(
+      async ({ githubRepoId }: { githubRepoId: number }) => {
+        if (githubRepoId === 4) throw new Error('500');
+        return githubRepoId === 3 ? 'none' : 'read';
+      },
+    );
+  });
+
+  it('GET /api/repos hides repos with none and repos whose lookup errors', async () => {
+    const res = await listRepos(req('/api/repos'), ctx({}));
+    expect(res.status).toBe(200);
+    expect(db.repo.findMany.mock.calls.at(-1)?.[0].where).toEqual({
+      orgId: 'org1',
+      id: { in: ['r1'] },
+    });
+  });
+
+  it('GET /api/repos returns [] without a query when nothing is visible', async () => {
+    db.user.findUnique.mockResolvedValue({ login: null });
+    const res = await listRepos(req('/api/repos'), ctx({}));
+    expect(await res.json()).toEqual([]);
+    expect(perm.getRepoPermission).not.toHaveBeenCalled();
+    expect(db.repo.findMany).not.toHaveBeenCalled();
+  });
+
+  it('owner/admin see every repo without GitHub calls', async () => {
+    memberships.get('u1')!.set('org1', 'owner');
+    db.repo.findMany.mockImplementation(async (args: { select?: object }) =>
+      args.select ? [{ id: 'r1' }, { id: 'r3' }] : [{ ...repo, pullRequests: [] }],
+    );
+    await listRepos(req('/api/repos'), ctx({}));
+    expect(perm.getRepoPermission).not.toHaveBeenCalled();
+    expect(db.repo.findMany.mock.calls.at(-1)?.[0].where.id).toEqual({ in: ['r1', 'r3'] });
+  });
+
+  it('runs at most 5 GitHub lookups at a time', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      ...repo,
+      id: `x${i}`,
+      githubRepoId: 100 + i,
+    }));
+    db.repo.findMany.mockImplementation(async (args: { include?: object }) =>
+      args.include && 'installation' in args.include ? many : [],
+    );
+    let inFlight = 0;
+    let peak = 0;
+    perm.getRepoPermission.mockImplementation(async () => {
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+      return 'read';
+    });
+    await listRepos(req('/api/repos'), ctx({}));
+    expect(perm.getRepoPermission).toHaveBeenCalledTimes(12);
+    expect(peak).toBe(5);
+  });
+
+  it('overview counts only visible repos', async () => {
+    db.repo.count.mockResolvedValue(1);
+    db.pullRequest.findMany.mockResolvedValue([]);
+    db.review.findMany.mockResolvedValue([]);
+    db.issue.groupBy.mockResolvedValue([]);
+    const res = await overview(req('/x'), ctx({ orgId: 'org1' }));
+    expect(res.status).toBe(200);
+    const visible = { orgId: 'org1', id: { in: ['r1'] } };
+    expect(db.repo.count.mock.calls[0]?.[0].where).toEqual(visible);
+    expect(db.pullRequest.findMany.mock.calls[0]?.[0].where.repo).toEqual(visible);
+    expect(db.review.findMany.mock.calls[0]?.[0].where.pullRequest).toEqual({ repo: visible });
+    for (const [args] of db.issue.groupBy.mock.calls) {
+      expect(args.where.review.pullRequest).toEqual({ repo: visible });
+    }
   });
 });
 
@@ -560,10 +800,13 @@ describe('POST /api/repos/:repoId/pulls/:number/merge', () => {
     gh.mergePullRequest.mockResolvedValue({ sha: 'mergeSha' });
   });
 
-  it('a plain member cannot merge (403)', async () => {
+  it('a member with only read access on GitHub cannot merge (403)', async () => {
     memberships.set('u1', new Map([['org1', 'member']]));
     const res = await call();
     expect(res.status).toBe(403);
+    expect(ApiErrorSchema.parse(await res.json()).error.message).toBe(
+      'Requires write access to this repository on GitHub',
+    );
     expect(gh.mergePullRequest).not.toHaveBeenCalled();
   });
 
@@ -646,9 +889,48 @@ describe('settings', () => {
     const body = GetRepoSettingsResponse.parse(await res.json());
     expect(body.settings.maxIssuesPerPr).toBe(30);
     expect(body.hasIngestToken).toBe(false);
+    expect(body.canEdit).toBe(false); // member with read
   });
 
-  it('PUT requires owner/admin', async () => {
+  it.each([
+    ['owner', 'none', true],
+    ['admin', 'none', true],
+    ['member', 'write', true],
+    ['member', 'maintain', true],
+    ['member', 'triage', false],
+  ] as const)('GET canEdit for %s with GitHub %s → %s', async (role, permission, canEdit) => {
+    memberships.get('u1')!.set('org1', role);
+    perm.getRepoPermission.mockResolvedValue(permission);
+    const res = await getSettings(req('/x'), ctx({ repoId: 'r1' }));
+    expect(res.status).toBe(200);
+    expect(GetRepoSettingsResponse.parse(await res.json()).canEdit).toBe(canEdit);
+  });
+
+  it('GET canEdit is false when the write check errors', async () => {
+    perm.getRepoPermission.mockResolvedValueOnce('read').mockRejectedValueOnce(new Error('500'));
+    const res = await getSettings(req('/x'), ctx({ repoId: 'r1' }));
+    expect(res.status).toBe(200);
+    expect(GetRepoSettingsResponse.parse(await res.json()).canEdit).toBe(false);
+  });
+
+  it('PUT: a member with write access on GitHub can save', async () => {
+    perm.getRepoPermission.mockResolvedValue('write');
+    db.repo.update.mockImplementation(async ({ data }: { data: object }) => ({ ...repo, ...data }));
+    const res = await putSettings(
+      req('/x', { method: 'PUT', body: JSON.stringify({ provider: 'platform', settings: {} }) }),
+      ctx({ repoId: 'r1' }),
+    );
+    expect(res.status).toBe(200);
+    expect(GetRepoSettingsResponse.parse(await res.json()).canEdit).toBe(true);
+    expect(perm.getRepoPermission).toHaveBeenCalledWith({
+      githubInstallationId: 7,
+      githubRepoId: 1,
+      fullName: 'acme/web',
+      login: 'octo',
+    });
+  });
+
+  it('PUT: a member with only read access on GitHub gets 403', async () => {
     const res = await putSettings(
       req('/x', { method: 'PUT', body: JSON.stringify({ provider: 'platform', settings: {} }) }),
       ctx({ repoId: 'r1' }),
@@ -699,7 +981,7 @@ describe('settings', () => {
     expect(JSON.stringify(db.repo.update.mock.calls)).not.toContain(token);
   });
 
-  it('rotate requires owner/admin', async () => {
+  it('rotate: a member with only read access on GitHub gets 403', async () => {
     const res = await rotate(req('/x', { method: 'POST' }), ctx({ repoId: 'r1' }));
     expect(res.status).toBe(403);
   });

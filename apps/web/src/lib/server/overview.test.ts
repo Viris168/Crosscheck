@@ -30,7 +30,7 @@ describe('buildOverview', () => {
       .mockResolvedValueOnce([{ category: 'security', _count: { _all: 3 } }])
       .mockResolvedValueOnce([{ severity: 'high', _count: { _all: 3 } }]);
 
-    const o = OverviewResponse.parse(await buildOverview('org1', '30d', now));
+    const o = OverviewResponse.parse(await buildOverview('org1', ['r1', 'r2'], '30d', now));
     expect(o.totals).toEqual({
       repos: 2,
       openPulls: 3,
@@ -55,7 +55,15 @@ describe('buildOverview', () => {
 
     // Org-scoped, range-scoped queries.
     const where = prisma.review.findMany.mock.calls[0]![0].where;
-    expect(where.pullRequest).toEqual({ repo: { orgId: 'org1' } });
+    expect(where.pullRequest).toEqual({ repo: { orgId: 'org1', id: { in: ['r1', 'r2'] } } });
+    expect(prisma.repo.count.mock.calls[0]![0].where).toEqual({
+      orgId: 'org1',
+      id: { in: ['r1', 'r2'] },
+    });
+    expect(prisma.pullRequest.findMany.mock.calls[0]![0].where.repo).toEqual({
+      orgId: 'org1',
+      id: { in: ['r1', 'r2'] },
+    });
     expect(where.createdAt.gte.toISOString()).toBe('2026-10-20T00:00:00.000Z');
   });
 });

@@ -28,6 +28,8 @@ import { PROVIDER_LABEL, SEVERITY_LABEL } from '@/lib/labels';
 
 type Settings = z.infer<typeof GetRepoSettingsResponse>;
 
+export const READ_ONLY_HINT = 'You need write access to this repository on GitHub.';
+
 export function RepoSettingsPage({ repoId }: { repoId: string }) {
   const { data, error, isPending } = useRepoSettings(repoId);
   if (isPending) return <LoadingState label="Loading settings…" />;
@@ -43,7 +45,11 @@ export function RepoSettingsPage({ repoId }: { repoId: string }) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <IngestTokenControl repoId={repoId} hasIngestToken={data.hasIngestToken} />
+          <IngestTokenControl
+            repoId={repoId}
+            hasIngestToken={data.hasIngestToken}
+            canEdit={data.canEdit}
+          />
         </CardContent>
       </Card>
     </div>
@@ -52,6 +58,7 @@ export function RepoSettingsPage({ repoId }: { repoId: string }) {
 
 function RepoSettingsForm({ repoId, initial }: { repoId: string; initial: Settings }) {
   const update = useUpdateRepoSettings(repoId);
+  const readOnly = !initial.canEdit;
   const [provider, setProvider] = useState<ProviderId>(initial.provider);
   const [s, setS] = useState<RepoSettings>(initial.settings);
   const [ignore, setIgnore] = useState(initial.settings.ignorePaths.join('\n'));
@@ -80,92 +87,109 @@ function RepoSettingsForm({ repoId, initial }: { repoId: string; initial: Settin
         <CardHeader>
           <CardTitle>Reviewer</CardTitle>
           <CardDescription>Which AI reviews this repository, and how.</CardDescription>
+          {readOnly && (
+            <p role="note" className="text-sm text-muted-foreground">
+              {READ_ONLY_HINT}
+            </p>
+          )}
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field id="provider" label="Provider" className="sm:col-span-2">
-            <Select
-              id="provider"
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as ProviderId)}
+        <fieldset
+          disabled={readOnly}
+          title={readOnly ? READ_ONLY_HINT : undefined}
+          className="contents"
+        >
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <Field id="provider" label="Provider" className="sm:col-span-2">
+              <Select
+                id="provider"
+                value={provider}
+                onChange={(e) => setProvider(e.target.value as ProviderId)}
+              >
+                {ProviderId.map((p) => (
+                  <option key={p} value={p}>
+                    {PROVIDER_LABEL[p]}
+                  </option>
+                ))}
+              </Select>
+              {provider !== initial.provider && (
+                <p className="text-xs text-muted-foreground">
+                  After saving, finish the steps in{' '}
+                  <Link className="underline" href={`/repos/${repoId}/setup`}>
+                    setup
+                  </Link>
+                  .
+                </p>
+              )}
+            </Field>
+            <Field id="model" label="Model (optional)">
+              <Input
+                id="model"
+                value={s.model ?? ''}
+                placeholder="Provider default"
+                onChange={(e) => set('model', e.target.value)}
+              />
+            </Field>
+            <Field id="minSeverity" label="Minimum severity to comment">
+              <Select
+                id="minSeverity"
+                value={s.minSeverity}
+                onChange={(e) => set('minSeverity', e.target.value as Severity)}
+              >
+                {Severity.map((v) => (
+                  <option key={v} value={v}>
+                    {SEVERITY_LABEL[v]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field id="maxIssuesPerPr" label="Max issues per PR">
+              <Input
+                id="maxIssuesPerPr"
+                type="number"
+                min={1}
+                max={200}
+                required
+                value={s.maxIssuesPerPr}
+                onChange={(e) => set('maxIssuesPerPr', Number.parseInt(e.target.value, 10) || 1)}
+              />
+            </Field>
+            <Field id="language" label="Comment language">
+              <Input
+                id="language"
+                value={s.language}
+                required
+                onChange={(e) => set('language', e.target.value)}
+              />
+            </Field>
+            <Field id="trigger" label="Trigger">
+              <Select
+                id="trigger"
+                value={s.trigger}
+                onChange={(e) => set('trigger', e.target.value as RepoSettings['trigger'])}
+              >
+                <option value="every_push">Every push</option>
+                <option value="on_command">On command only</option>
+              </Select>
+            </Field>
+            <Field
+              id="ignorePaths"
+              label="Ignore paths (one glob per line)"
+              className="sm:col-span-2"
             >
-              {ProviderId.map((p) => (
-                <option key={p} value={p}>
-                  {PROVIDER_LABEL[p]}
-                </option>
-              ))}
-            </Select>
-            {provider !== initial.provider && (
-              <p className="text-xs text-muted-foreground">
-                After saving, finish the steps in{' '}
-                <Link className="underline" href={`/repos/${repoId}/setup`}>
-                  setup
-                </Link>
-                .
-              </p>
-            )}
-          </Field>
-          <Field id="model" label="Model (optional)">
-            <Input
-              id="model"
-              value={s.model ?? ''}
-              placeholder="Provider default"
-              onChange={(e) => set('model', e.target.value)}
-            />
-          </Field>
-          <Field id="minSeverity" label="Minimum severity to comment">
-            <Select
-              id="minSeverity"
-              value={s.minSeverity}
-              onChange={(e) => set('minSeverity', e.target.value as Severity)}
-            >
-              {Severity.map((v) => (
-                <option key={v} value={v}>
-                  {SEVERITY_LABEL[v]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field id="maxIssuesPerPr" label="Max issues per PR">
-            <Input
-              id="maxIssuesPerPr"
-              type="number"
-              min={1}
-              max={200}
-              required
-              value={s.maxIssuesPerPr}
-              onChange={(e) => set('maxIssuesPerPr', Number.parseInt(e.target.value, 10) || 1)}
-            />
-          </Field>
-          <Field id="language" label="Comment language">
-            <Input
-              id="language"
-              value={s.language}
-              required
-              onChange={(e) => set('language', e.target.value)}
-            />
-          </Field>
-          <Field id="trigger" label="Trigger">
-            <Select
-              id="trigger"
-              value={s.trigger}
-              onChange={(e) => set('trigger', e.target.value as RepoSettings['trigger'])}
-            >
-              <option value="every_push">Every push</option>
-              <option value="on_command">On command only</option>
-            </Select>
-          </Field>
-          <Field
-            id="ignorePaths"
-            label="Ignore paths (one glob per line)"
-            className="sm:col-span-2"
-          >
-            <Textarea id="ignorePaths" value={ignore} onChange={(e) => setIgnore(e.target.value)} />
-          </Field>
-        </CardContent>
+              <Textarea
+                id="ignorePaths"
+                value={ignore}
+                onChange={(e) => setIgnore(e.target.value)}
+              />
+            </Field>
+          </CardContent>
+        </fieldset>
         <CardFooter>
-          <Button type="submit" disabled={update.isPending}>
-            {update.isPending ? 'Saving…' : 'Save settings'}
-          </Button>
+          <span title={readOnly ? READ_ONLY_HINT : undefined}>
+            <Button type="submit" disabled={readOnly || update.isPending}>
+              {update.isPending ? 'Saving…' : 'Save settings'}
+            </Button>
+          </span>
           <Link className={buttonVariants({ variant: 'ghost' })} href={`/repos/${repoId}/setup`}>
             Setup guide
           </Link>

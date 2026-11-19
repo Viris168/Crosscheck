@@ -1,21 +1,23 @@
 import { prisma } from '@app/db';
 import { ListReposResponse } from '@app/shared';
 import { json, route } from '@/lib/server/http';
+import { visibleRepoIds } from '@/lib/server/access';
 import { resolveCurrentOrgId } from '@/lib/server/org';
 import { toLatestReviewSummary } from '@/lib/server/serialize';
-import { requireOrgMember, requireSession } from '@/server/auth';
+import { requireSession } from '@/server/auth';
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/repos — repos of the current (active) organization. */
+/** GET /api/repos — repos of the current (active) organization the user can see on GitHub. */
 export const GET = route(async (req) => {
   const session = await requireSession(req);
   const orgId = await resolveCurrentOrgId(session);
   if (!orgId) return json(ListReposResponse, []);
-  await requireOrgMember(session.user.id, orgId);
+  const ids = await visibleRepoIds(session.user.id, orgId);
+  if (ids.length === 0) return json(ListReposResponse, []);
 
   const repos = await prisma.repo.findMany({
-    where: { orgId },
+    where: { orgId, id: { in: ids } },
     orderBy: { fullName: 'asc' },
     include: {
       pullRequests: {
