@@ -91,9 +91,7 @@ async function openOrReusePr(
 }
 
 export function setupPrBody(provider: ActionProvider): string {
-  const secrets = REQUIRED_SECRETS[provider]
-    .map((s) => `- \`${s.name}\` — ${s.how}`)
-    .join('\n');
+  const secrets = REQUIRED_SECRETS[provider].map((s) => `- \`${s.name}\` — ${s.how}`).join('\n');
   return [
     `This PR adds \`${WORKFLOW_PATH}\`, which reviews every pull request with ${
       provider === 'claude_action' ? 'Claude Code' : 'Codex'
@@ -135,7 +133,15 @@ export async function openWorkflowPR(
       ...(sha ? { sha } : {}),
     }),
   );
-  return openOrReusePr(octokit, owner, repo, SETUP_BRANCH, base, SETUP_PR_TITLE, setupPrBody(provider));
+  return openOrReusePr(
+    octokit,
+    owner,
+    repo,
+    SETUP_BRANCH,
+    base,
+    SETUP_PR_TITLE,
+    setupPrBody(provider),
+  );
 }
 
 /**

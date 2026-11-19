@@ -21,7 +21,11 @@ const matches = (row: Row, where: Row): boolean =>
   });
 
 const pickSel = (row: Row | undefined, select?: Row) =>
-  !row ? null : select ? Object.fromEntries(Object.keys(select).map((k) => [k, row[k] ?? null])) : row;
+  !row
+    ? null
+    : select
+      ? Object.fromEntries(Object.keys(select).map((k) => [k, row[k] ?? null]))
+      : row;
 
 const db: any = {
   repo: {
@@ -57,7 +61,10 @@ const db: any = {
       return { count: hits.length };
     },
     update: async ({ where, data }: any) =>
-      Object.assign(h.t.review.find((r) => r.id === where.id)!, data),
+      Object.assign(
+        h.t.review.find((r) => r.id === where.id)!,
+        data,
+      ),
   },
   issue: {
     deleteMany: async ({ where }: any) => {

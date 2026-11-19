@@ -11,7 +11,9 @@ describe('chatgptOAuth', () => {
   it('builds an authorize URL with plan-usage scopes, resource and PKCE', () => {
     const { challenge } = createPkcePair();
     const oauth = createChatgptOAuth({ env });
-    const url = new URL(oauth.authorizeUrl('st_1', 'https://app.test/cb', { codeChallenge: challenge, nonce: 'n1' }));
+    const url = new URL(
+      oauth.authorizeUrl('st_1', 'https://app.test/cb', { codeChallenge: challenge, nonce: 'n1' }),
+    );
     expect(url.origin + url.pathname).toBe('https://auth.openai.com/api/accounts/authorize');
     const q = url.searchParams;
     expect(q.get('client_id')).toBe('client_1');
@@ -21,7 +23,12 @@ describe('chatgptOAuth', () => {
     expect(q.get('redirect_uri')).toBe('https://app.test/cb');
     expect(q.get('resource')).toBe('https://api.openai.com/v1');
     expect(q.get('scope')?.split(' ')).toEqual(
-      expect.arrayContaining(['openid', 'offline_access', 'resource.invoke', 'chatgpt.tokens.use.direct']),
+      expect.arrayContaining([
+        'openid',
+        'offline_access',
+        'resource.invoke',
+        'chatgpt.tokens.use.direct',
+      ]),
     );
     expect(q.get('code_challenge')).toBe(challenge);
     expect(q.get('code_challenge_method')).toBe('S256');
@@ -41,8 +48,14 @@ describe('chatgptOAuth', () => {
         scope: 'openid offline_access resource.invoke chatgpt.tokens.use.direct',
       }),
     );
-    const oauth = createChatgptOAuth({ env: { ...env, CHATGPT_OAUTH_CLIENT_SECRET: 'sec' }, fetch: fetchMock as unknown as typeof fetch, now: () => NOW });
-    const tokens = await oauth.exchangeCode('code_1', 'https://app.test/cb', { codeVerifier: 'ver' });
+    const oauth = createChatgptOAuth({
+      env: { ...env, CHATGPT_OAUTH_CLIENT_SECRET: 'sec' },
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => NOW,
+    });
+    const tokens = await oauth.exchangeCode('code_1', 'https://app.test/cb', {
+      codeVerifier: 'ver',
+    });
     expect(tokens.accessToken).toBe('at');
     expect(tokens.refreshToken).toBe('rt');
     expect(tokens.expiresAt).toEqual(new Date(NOW.getTime() + 3600_000));
@@ -58,7 +71,9 @@ describe('chatgptOAuth', () => {
   });
 
   it('rejects a grant without the plan-usage scope', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse(200, { access_token: 'at', scope: 'openid profile email' }));
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, { access_token: 'at', scope: 'openid profile email' }),
+    );
     const oauth = createChatgptOAuth({ env, fetch: fetchMock as unknown as typeof fetch });
     const err = await oauth.exchangeCode('c', 'https://app.test/cb').catch((e: unknown) => e);
     expect((err as ProviderError).code).toBe('provider_auth');

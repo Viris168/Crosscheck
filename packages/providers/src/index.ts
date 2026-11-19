@@ -17,7 +17,11 @@ export {
 } from './chatgpt-oauth';
 export { toProviderError, codeForStatus } from './errors';
 export type { CredentialStore, StoredCredential, RepoModelLookup } from './credentials';
-export { createPlatformProvider, DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL } from './providers/platform';
+export {
+  createPlatformProvider,
+  DEFAULT_ANTHROPIC_MODEL,
+  DEFAULT_OPENAI_MODEL,
+} from './providers/platform';
 export { createCodexChatgptProvider, DEFAULT_CHATGPT_MODEL } from './providers/codex-chatgpt';
 export { createActionProvider } from './providers/action';
 export { mockProvider, mockReview, type MockProvider } from './providers/mock';

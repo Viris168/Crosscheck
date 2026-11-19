@@ -51,7 +51,8 @@ interface TokenResponse {
 
 function parseScopes(body: TokenResponse): string[] | undefined {
   if (typeof body.scope === 'string') return body.scope.split(/\s+/).filter(Boolean);
-  if (Array.isArray(body.scopes)) return body.scopes.filter((s): s is string => typeof s === 'string');
+  if (Array.isArray(body.scopes))
+    return body.scopes.filter((s): s is string => typeof s === 'string');
   return undefined;
 }
 

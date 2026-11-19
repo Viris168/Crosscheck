@@ -7,7 +7,9 @@ import { sampleInput } from '../src/test-fixtures';
 const provider = createPlatformProvider({ repoModelLookup: async () => undefined });
 
 try {
-  const result = await provider.reviewChunk(sampleInput({ chunkCount: 1 }), { orgId: 'try-platform' });
+  const result = await provider.reviewChunk(sampleInput({ chunkCount: 1 }), {
+    orgId: 'try-platform',
+  });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } catch (err) {
   const e = err as { code?: string; message?: string };

@@ -118,7 +118,10 @@ async function findOrCreateReview(
     throw new HttpError('conflict', 'head_sha does not match a review waiting for this Action');
   }
   if (!isActionProvider(repo.provider)) {
-    throw new HttpError('conflict', 'This repository is not configured for a GitHub Action reviewer');
+    throw new HttpError(
+      'conflict',
+      'This repository is not configured for a GitHub Action reviewer',
+    );
   }
   // Same creation path as the webhook (waiting_action, no event); a race with the webhook is fine.
   await requestReview({
@@ -147,7 +150,8 @@ async function ingestNoOutput(review: ReviewRow, repoId: string): Promise<Respon
       finishedAt: new Date(),
     },
   });
-  if (res.count === 0) throw new HttpError('conflict', 'Review is no longer waiting for the Action');
+  if (res.count === 0)
+    throw new HttpError('conflict', 'Review is no longer waiting for the Action');
   logger.info({ reviewId: review.id, repoId }, 'ingest: action produced no output');
   return json({ reviewId: review.id, duplicate: false }, 200);
 }
@@ -232,7 +236,10 @@ export async function handleIngestReview(req: Request): Promise<Response> {
   try {
     const { repo, tokenHash } = await authenticate(req);
     if (!(await allowIngest(tokenHash))) {
-      throw new HttpError('rate_limited', 'Too many ingest requests for this token; try again later');
+      throw new HttpError(
+        'rate_limited',
+        'Too many ingest requests for this token; try again later',
+      );
     }
 
     const body = await parseBody(req);
