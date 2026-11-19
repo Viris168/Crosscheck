@@ -6,3 +6,11 @@ export {
   type RequestReviewInput,
   type RequestReviewResult,
 } from './reviews';
+export {
+  getRepoPermission,
+  invalidateRepoPermission,
+  permissionAtLeast,
+  REPO_PERMISSION_TTL_SECONDS,
+  type GetRepoPermissionInput,
+  type RepoPermission,
+} from './permissions';
