@@ -2,6 +2,7 @@
 
 import type { ReviewDetail } from '@app/shared/client';
 import { Alert } from '@/components/ui/alert';
+import { useChatGptConnection } from '@/hooks/use-connections';
 import { useCancelReview, useRerunReview, useRetryReview } from '@/hooks/use-reviews';
 import { ApiError } from '@/lib/api-client';
 import {
@@ -29,11 +30,13 @@ export function ReviewPanel({
   const retry = useRetryReview(ctx.repoId);
   const rerun = useRerunReview(ctx.repoId, ctx.prNumber);
   const cancel = useCancelReview(ctx.repoId);
+  const chatgpt = useChatGptConnection();
   const actions: ReviewActions = {
     onRetry: () => retry.mutate(review.id, { onSuccess: (r) => onStarted?.(r.reviewId) }),
     onCancel: () => cancel.mutate(review.id),
     onRerun: (provider) => rerun.mutate(provider, { onSuccess: (r) => onStarted?.(r.reviewId) }),
     pending: retry.isPending || rerun.isPending || cancel.isPending,
+    chatgptConnected: chatgpt.data?.connected ?? false,
   };
   const error = retry.error ?? rerun.error ?? cancel.error;
 

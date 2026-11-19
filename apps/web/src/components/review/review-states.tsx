@@ -1,6 +1,11 @@
 'use client';
 
-import { ProviderId, type ReviewDetail, type ReviewIssueWithId } from '@app/shared/client';
+import {
+  isActionProvider,
+  ProviderId,
+  type ReviewDetail,
+  type ReviewIssueWithId,
+} from '@app/shared/client';
 import { AlertTriangle, CheckCircle2, Circle, Clock, ExternalLink, RotateCw } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -28,6 +33,8 @@ export interface ReviewActions {
   onCancel: () => void;
   onRerun: (provider?: ProviderId) => void;
   pending: boolean;
+  /** Codex (ChatGPT plan) is only offered once the org has connected ChatGPT. */
+  chatgptConnected: boolean;
 }
 
 interface StateProps {
@@ -119,6 +126,10 @@ export function ReviewWaitingAction({ review, ctx }: StateProps) {
             </li>
           ))}
         </ul>
+        <p className="text-muted-foreground">
+          If the workflow already ran for this commit, re-run it from the Actions tab. The platform
+          can&apos;t start it for you.
+        </p>
       </CardContent>
       <CardFooter>
         <Link className={buttonVariants()} href={`/repos/${ctx.repoId}/setup`}>
@@ -187,9 +198,13 @@ export function ReviewCompleted({ review, ctx, actions }: StateProps & { actions
           {review.summary && <p className="text-sm whitespace-pre-line">{review.summary}</p>}
         </CardContent>
         <CardFooter>
-          <Button onClick={() => actions.onRerun()} disabled={actions.pending}>
-            <RotateCw aria-hidden /> Re-run
-          </Button>
+          {isActionProvider(review.provider) ? (
+            <p className="text-sm text-muted-foreground">Push a new commit to review again.</p>
+          ) : (
+            <Button onClick={() => actions.onRerun()} disabled={actions.pending}>
+              <RotateCw aria-hidden /> Re-run
+            </Button>
+          )}
           <RerunWithOther current={review.provider} actions={actions} />
         </CardFooter>
       </Card>
@@ -251,9 +266,12 @@ function RerunWithOther({
   actions: ReviewActions;
   label?: string;
 }) {
-  const others = ProviderId.filter((p) => p !== current);
-  const [provider, setProvider] = useState<ProviderId>(others[0]!);
+  const others = ProviderId.filter(
+    (p) => p !== current && (p !== 'codex_chatgpt' || actions.chatgptConnected),
+  );
+  const [provider, setProvider] = useState<ProviderId | undefined>(others[0]);
   const id = `rerun-provider-${current}`;
+  if (!provider) return null;
   return (
     <div className="flex items-center gap-2">
       <Label htmlFor={id} className="sr-only">
