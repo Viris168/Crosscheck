@@ -107,6 +107,15 @@ export async function rerunReview(args: {
     where: { pullRequestId_headSha_provider: key },
   });
 
+  // We can't start the user's workflow, so resetting a completed Action review would only drop its
+  // result; and GitHub's own re-run of the same commit is not accepted once a result is in.
+  if (existing?.status === 'completed' && isActionProvider(provider)) {
+    throw new HttpError(
+      'conflict',
+      'This commit already has a completed review from your GitHub Action. Push a new commit to review again.',
+    );
+  }
+
   let reviewId: string;
   let status: ReviewStatus;
   if (existing) {

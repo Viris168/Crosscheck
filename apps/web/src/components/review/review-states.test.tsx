@@ -32,12 +32,20 @@ function review(over: Partial<ReviewDetail> = {}): ReviewDetail {
   });
 }
 
-const actions = (): ReviewActions => ({
+const actions = (over: Partial<ReviewActions> = {}): ReviewActions => ({
   onRetry: vi.fn(),
   onCancel: vi.fn(),
   onRerun: vi.fn(),
   pending: false,
+  chatgptConnected: false,
+  ...over,
 });
+
+const otherProviders = () =>
+  Array.from(
+    (screen.getByLabelText('Other provider') as HTMLSelectElement).options,
+    (o) => o.value,
+  );
 
 describe('review states', () => {
   it('queued: waiting to start, provider, cancel', async () => {
@@ -143,6 +151,42 @@ describe('review states', () => {
     expect(a.onRerun).toHaveBeenCalledWith('codex_action');
   });
 
+  it('completed Action review: no Re-run (it would only drop the result), push a commit instead', () => {
+    render(
+      <ReviewState
+        review={review({ status: 'completed', provider: 'claude_action' })}
+        ctx={ctx}
+        actions={actions()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Re-run' })).toBeNull();
+    expect(screen.getByText('Push a new commit to review again.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Re-run with' })).toBeTruthy();
+  });
+
+  it('offers Codex (ChatGPT plan) only once ChatGPT is connected', () => {
+    const r = review({ status: 'failed', errorCode: 'internal', provider: 'claude_action' });
+    const { unmount } = render(<ReviewState review={r} ctx={ctx} actions={actions()} />);
+    expect(otherProviders()).toEqual(['codex_action', 'platform']);
+    unmount();
+    render(<ReviewState review={r} ctx={ctx} actions={actions({ chatgptConnected: true })} />);
+    expect(otherProviders()).toContain('codex_chatgpt');
+  });
+
+  it('waiting for the Action explains that a finished workflow must be re-run on GitHub', () => {
+    render(
+      <ReviewState
+        review={review({ status: 'waiting_action', provider: 'claude_action' })}
+        ctx={ctx}
+        actions={actions()}
+      />,
+    );
+    expect(screen.getByText(/re-run it from the Actions tab/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Open Actions tab/ }).getAttribute('href')).toBe(
+      'https://github.com/acme/web/actions',
+    );
+  });
+
   it('completed with too_large shows the partial-review notice', () => {
     render(
       <ReviewState
@@ -221,10 +265,18 @@ describe('failure messages', () => {
 describe('ReviewPanel', () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  /** fetch mock: the ChatGPT connection query gets "not connected", every other call `respond()`. */
+  const api = (respond: () => Response) =>
+    vi.fn(async (url: string) =>
+      url === '/api/connections/chatgpt'
+        ? Response.json({ connected: false, orgId: null })
+        : respond(),
+    );
+
   it('retries through the API and reports the new review id', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(Response.json({ reviewId: 'rev_1', status: 'queued' }, { status: 202 }));
+    const fetchMock = api(() =>
+      Response.json({ reviewId: 'rev_1', status: 'queued' }, { status: 202 }),
+    );
     vi.stubGlobal('fetch', fetchMock);
     const onStarted = vi.fn();
     renderWithQuery(
@@ -236,20 +288,18 @@ describe('ReviewPanel', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await vi.waitFor(() => expect(onStarted).toHaveBeenCalledWith('rev_1'));
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/reviews/rev_1/retry');
+    expect(fetchMock.mock.calls.map((c) => c[0])).toContain('/api/reviews/rev_1/retry');
   });
 
   it('shows the API error message when a re-run conflicts', async () => {
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json(
-            { error: { code: 'conflict', message: 'This review is already in progress' } },
-            { status: 409 },
-          ),
+      api(() =>
+        Response.json(
+          { error: { code: 'conflict', message: 'This review is already in progress' } },
+          { status: 409 },
         ),
+      ),
     );
     renderWithQuery(<ReviewPanel review={review({ status: 'completed' })} ctx={ctx} />);
     await userEvent.click(screen.getByRole('button', { name: 'Re-run' }));
