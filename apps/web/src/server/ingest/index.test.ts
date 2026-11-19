@@ -262,6 +262,22 @@ describe('POST /api/ingest/review', () => {
     expect((await post(result())).status).toBe(409);
   });
 
+  it('picks the waiting review when the repo provider matches none (newer one failed)', async () => {
+    h.t.repo[0]!.provider = 'platform';
+    h.t.review.push({
+      id: 'rev_2',
+      pullRequestId: 'pr_1',
+      headSha: SHA,
+      provider: 'codex_action',
+      status: 'failed',
+      errorCode: 'action_missing',
+      startedAt: null,
+      createdAt: 2,
+    });
+    expect((await post(result())).status).toBe(202);
+    expect(h.t.review.find((r) => r.id === 'rev_1')!.startedAt).not.toBeNull();
+  });
+
   it('review not waiting (e.g. cancelled / timed out) → 409', async () => {
     h.t.review[0]!.status = 'cancelled';
     expect((await post(result())).status).toBe(409);

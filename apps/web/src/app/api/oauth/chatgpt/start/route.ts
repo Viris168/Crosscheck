@@ -1,3 +1,4 @@
+import { chatgptOAuth } from '@app/providers';
 import { HttpError } from '@app/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 import {
@@ -9,7 +10,6 @@ import {
   safeReturnTo,
 } from '@/lib/server/oauth-state';
 import { resolveCurrentOrgId } from '@/lib/server/org';
-import { chatgptOAuth } from '@/lib/stubs';
 import { auth } from '@/server/auth';
 import { env } from '@/server/env';
 import { logger } from '@/server/logger';
@@ -37,11 +37,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     if (!orgId) return back('no_org');
 
     const { pending, codeChallenge } = newPendingAuth(orgId, returnTo);
-    const url = chatgptOAuth.authorizeUrl({
-      state: pending.state,
-      codeChallenge,
-      redirectUri: redirectUri(),
-    });
+    const url = chatgptOAuth.authorizeUrl(pending.state, redirectUri(), { codeChallenge });
     const res = NextResponse.redirect(url);
     res.cookies.set(CHATGPT_OAUTH_COOKIE, encodePending(pending), {
       httpOnly: true,

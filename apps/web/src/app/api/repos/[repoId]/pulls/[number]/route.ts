@@ -3,7 +3,7 @@ import { GetPullResponse, PullParams } from '@app/shared';
 import { requirePullAccess } from '@/lib/server/access';
 import { json, route } from '@/lib/server/http';
 import { toPullHeader, toReviewDetail, toReviewSummary } from '@/lib/server/serialize';
-import { fetchPullFiles } from '@/lib/stubs';
+import { fetchPullFiles } from '@/lib/server/pull-files';
 import { requireSession } from '@/server/auth';
 import { logger } from '@/server/logger';
 
@@ -25,10 +25,13 @@ export const GET = route<{ repoId: string; number: string }>(async (req, params)
   ]);
 
   // Patches come live from GitHub and are never stored; a GitHub failure must not hide the review.
-  const files = await fetchPullFiles(repo, pull).catch((err: unknown) => {
-    logger.warn({ repoId, err: (err as Error).message }, 'could not load PR files');
-    return [];
-  });
+  const files = await prisma.installation
+    .findUnique({ where: { id: repo.installationId } })
+    .then((installation) => (installation ? fetchPullFiles(repo, installation, pull) : []))
+    .catch((err: unknown) => {
+      logger.warn({ repoId, err: (err as Error).message }, 'could not load PR files');
+      return [];
+    });
 
   return json(GetPullResponse, {
     pull: toPullHeader(pull, repo),
