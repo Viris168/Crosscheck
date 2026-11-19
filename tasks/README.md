@@ -10,6 +10,7 @@ Day 1      00-foundation.md                    → review → merge to main
 Days 2-4   Wave 1: A-github, C-providers, F-frontend
 Days 4-7   Wave 2: B-jobs, D-ingest-actions, E-scoring-comments   (start once A and C are merged; F continues)
 Day 8      Wave 3: G-infra, then one integration agent (see bottom)
+           Hosting: free local demo for now (no VPS, no paid services). See tasks/G-infra.md "Scope now".
 ```
 Run **3 agents at a time** at most — you have to review every PR.
 

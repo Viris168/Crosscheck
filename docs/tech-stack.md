@@ -27,7 +27,7 @@ shapes are **zod schemas shared** between client and server.
 | UI | Tailwind CSS + shadcn/ui | |
 | Tests | Vitest (unit/integration), Playwright (e2e smoke) | |
 | Containers | **Docker & Docker Compose** | Same compose services locally and in production. |
-| Hosting | **Ubuntu VPS + Caddy** | Caddy = automatic Let's Encrypt HTTPS. ~2 vCPU / 4 GB RAM to start. |
+| Hosting | **Now: local demo ($0).** Later: **Ubuntu VPS + Caddy** | Demo runs on a laptop (dev compose + smee.io webhooks, optional Cloudflare quick tunnel). VPS design is kept and documented: Caddy = automatic Let's Encrypt HTTPS, ~2 vCPU / 4 GB RAM (Oracle Cloud Always Free fits). |
 
 ## What we are NOT using (and why)
 | Not using | Reason |
