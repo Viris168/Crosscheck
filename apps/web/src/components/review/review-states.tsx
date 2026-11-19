@@ -1,6 +1,11 @@
 'use client';
 
-import { ProviderId, type ReviewDetail, type ReviewIssueWithId } from '@app/shared/client';
+import {
+  isActionProvider,
+  ProviderId,
+  type ReviewDetail,
+  type ReviewIssueWithId,
+} from '@app/shared/client';
 import { AlertTriangle, CheckCircle2, Circle, Clock, ExternalLink, RotateCw } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -8,9 +13,11 @@ import { ProviderBadge, RiskBadge, SeverityBadge } from '@/components/chips';
 import { Alert } from '@/components/ui/alert';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { CopyButton } from '@/components/ui/copy-button';
 import { Label, Select } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { filesTabHref } from '@/lib/diff';
+import { issueFixPrompt, reviewFixPrompt } from '@/lib/fix-prompt';
 import { formatDuration, PROVIDER_LABEL, shortSha } from '@/lib/labels';
 import { useNow } from '@/lib/use-now';
 import { failureMessage } from './failure-message';
@@ -21,6 +28,8 @@ export interface ReviewContext {
   prNumber: number;
   /** Base path of the PR page, used for "jump to line" links. */
   prPath: string;
+  /** The PR's branch, named in "Copy for Claude" prompts. */
+  headRef?: string;
 }
 
 export interface ReviewActions {
@@ -28,6 +37,8 @@ export interface ReviewActions {
   onCancel: () => void;
   onRerun: (provider?: ProviderId) => void;
   pending: boolean;
+  /** Codex (ChatGPT plan) is only offered once the org has connected ChatGPT. */
+  chatgptConnected: boolean;
 }
 
 interface StateProps {
@@ -119,6 +130,10 @@ export function ReviewWaitingAction({ review, ctx }: StateProps) {
             </li>
           ))}
         </ul>
+        <p className="text-muted-foreground">
+          If the workflow already ran for this commit, re-run it from the Actions tab. The platform
+          can&apos;t start it for you.
+        </p>
       </CardContent>
       <CardFooter>
         <Link className={buttonVariants()} href={`/repos/${ctx.repoId}/setup`}>
@@ -187,17 +202,30 @@ export function ReviewCompleted({ review, ctx, actions }: StateProps & { actions
           {review.summary && <p className="text-sm whitespace-pre-line">{review.summary}</p>}
         </CardContent>
         <CardFooter>
-          <Button onClick={() => actions.onRerun()} disabled={actions.pending}>
-            <RotateCw aria-hidden /> Re-run
-          </Button>
+          {isActionProvider(review.provider) ? (
+            <p className="text-sm text-muted-foreground">Push a new commit to review again.</p>
+          ) : (
+            <Button onClick={() => actions.onRerun()} disabled={actions.pending}>
+              <RotateCw aria-hidden /> Re-run
+            </Button>
+          )}
           <RerunWithOther current={review.provider} actions={actions} />
         </CardFooter>
       </Card>
 
       <section aria-labelledby="issues-heading" className="flex flex-col gap-3">
-        <h3 id="issues-heading" className="text-sm font-semibold">
-          Issues ({review.issues.length})
-        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 id="issues-heading" className="text-sm font-semibold">
+            Issues ({review.issues.length})
+          </h3>
+          {review.issues.length > 0 && (
+            <CopyButton
+              value={reviewFixPrompt(ctx, review.issues)}
+              label="Copy all for Claude"
+              title="Copy a prompt with every finding, to paste into Claude Code"
+            />
+          )}
+        </div>
         {review.issues.length === 0 && (
           <p className="text-sm text-muted-foreground">No issues found.</p>
         )}
@@ -209,11 +237,11 @@ export function ReviewCompleted({ review, ctx, actions }: StateProps & { actions
             <CardContent>
               <ul className="flex flex-col divide-y">
                 {issues.map((issue) => (
-                  <li key={issue.id} className="py-2 first:pt-0 last:pb-0">
+                  <li key={issue.id} className="flex items-start gap-2 py-2 first:pt-0 last:pb-0">
                     <Link
                       href={filesTabHref(ctx.prPath, issue.file, issue.line, review.id)}
                       scroll={false}
-                      className="flex flex-col gap-1 rounded-md p-1 outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      className="flex min-w-0 flex-1 flex-col gap-1 rounded-md p-1 outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     >
                       <span className="flex flex-wrap items-center gap-2">
                         <SeverityBadge severity={issue.severity} />
@@ -225,6 +253,11 @@ export function ReviewCompleted({ review, ctx, actions }: StateProps & { actions
                       </span>
                       <span className="text-sm text-muted-foreground">{issue.explanation}</span>
                     </Link>
+                    <CopyButton
+                      value={issueFixPrompt(ctx, issue)}
+                      label="Copy for Claude"
+                      title={`Copy a prompt to fix "${issue.title}" in Claude Code`}
+                    />
                   </li>
                 ))}
               </ul>
@@ -251,9 +284,12 @@ function RerunWithOther({
   actions: ReviewActions;
   label?: string;
 }) {
-  const others = ProviderId.filter((p) => p !== current);
-  const [provider, setProvider] = useState<ProviderId>(others[0]!);
+  const others = ProviderId.filter(
+    (p) => p !== current && (p !== 'codex_chatgpt' || actions.chatgptConnected),
+  );
+  const [provider, setProvider] = useState<ProviderId | undefined>(others[0]);
   const id = `rerun-provider-${current}`;
+  if (!provider) return null;
   return (
     <div className="flex items-center gap-2">
       <Label htmlFor={id} className="sr-only">

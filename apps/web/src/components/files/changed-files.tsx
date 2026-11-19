@@ -1,12 +1,15 @@
 'use client';
 
-import type { ChangedFileSchema, ReviewIssueWithId } from '@app/shared/client';
+import type { ChangedFileSchema, ReviewIssueWithId, Severity } from '@app/shared/client';
 import { FileCode2, Folder } from 'lucide-react';
 import { Fragment, useEffect, useMemo } from 'react';
 import type { z } from 'zod';
 import { DiffStat, SeverityBadge } from '@/components/chips';
 import { Card } from '@/components/ui/card';
-import { fileAnchor, lineAnchor, parsePatch } from '@/lib/diff';
+import { CopyButton } from '@/components/ui/copy-button';
+import { changedRanges, fileAnchor, lineAnchor, parsePatch, type DiffLine } from '@/lib/diff';
+import { issueFixPrompt, type FixTarget } from '@/lib/fix-prompt';
+import { highlightLine, languageFor, markRange } from '@/lib/highlight';
 import { cn } from '@/lib/utils';
 
 type ChangedFile = z.infer<typeof ChangedFileSchema>;
@@ -16,10 +19,13 @@ export function ChangedFiles({
   files,
   issues,
   focus,
+  target,
 }: {
   files: ChangedFile[];
   issues: ReviewIssueWithId[];
   focus?: { file: string; line?: number } | null;
+  /** The PR, for "Copy for Claude" prompts on findings; no button without it. */
+  target?: FixTarget;
 }) {
   const issuesByFile = useMemo(() => {
     const m = new Map<string, Map<number, ReviewIssueWithId[]>>();
@@ -58,6 +64,7 @@ export function ChangedFiles({
             file={f}
             issues={issuesByFile.get(f.path)}
             focusLine={focus?.file === f.path ? focus.line : undefined}
+            target={target}
           />
         ))}
       </div>
@@ -121,25 +128,91 @@ function FileTree({
   );
 }
 
-const ROW_TONE = {
-  add: 'bg-green-50',
-  del: 'bg-red-50',
+/** Row / side-bar classes per line kind; colours live in globals.css (`.diff-dark`). */
+const ROW = {
+  add: 'diff-row-add',
+  del: 'diff-row-del',
   context: '',
-  hunk: 'bg-blue-50 text-blue-900',
-  meta: 'text-muted-foreground',
+  hunk: 'diff-row-hunk',
+  meta: 'diff-row-meta',
 } as const;
-const SIGN = { add: '+', del: '−', context: ' ', hunk: '', meta: '' } as const;
+const BAR = { add: 'diff-bar-add', del: 'diff-bar-del', context: '', hunk: '', meta: '' } as const;
+
+/** One diff line: syntax-highlighted, with the changed characters of a paired edit marked. */
+function Code({
+  line,
+  language,
+  range,
+}: {
+  line: DiffLine;
+  language?: string;
+  range?: [number, number];
+}) {
+  if (line.kind === 'hunk' || line.kind === 'meta') return <>{line.text}</>;
+  const segments = highlightLine(line.text, language);
+  return (
+    <>
+      {(range ? markRange(segments, range) : segments).map((seg, i) => (
+        <span key={i} className={cn(seg.cls, seg.mark && 'diff-word')}>
+          {seg.text}
+        </span>
+      ))}
+    </>
+  );
+}
+
+const SEVERITY_RANK: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+
+/** The most severe level among a line's findings; it sets the line's bar and note colour. */
+function worst(issues: ReviewIssueWithId[]): Severity {
+  return issues.reduce<Severity>(
+    (w, i) => (SEVERITY_RANK[i.severity] > SEVERITY_RANK[w] ? i.severity : w),
+    'low',
+  );
+}
+
+/** One finding under a diff line: glass severity + category, title, explanation, suggested fix. */
+function IssueNote({ issue, target }: { issue: ReviewIssueWithId; target?: FixTarget }) {
+  return (
+    <li className="flex flex-col gap-2 px-5 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <SeverityBadge severity={issue.severity} glass />
+        <span className="glass-chip">{issue.category}</span>
+        <span className="diff-issue-title">{issue.title}</span>
+        {target && (
+          <CopyButton
+            value={issueFixPrompt(target, issue)}
+            label="Copy for Claude"
+            title={`Copy a prompt to fix "${issue.title}" in Claude Code`}
+            className="glass-button ml-auto"
+          />
+        )}
+      </div>
+      <p className="diff-issue-text max-w-[80ch]">{issue.explanation}</p>
+      {issue.suggested_fix && (
+        <details className="diff-issue-fix">
+          <summary>Suggested fix</summary>
+          <pre>{issue.suggested_fix}</pre>
+        </details>
+      )}
+    </li>
+  );
+}
 
 function FileDiff({
   file,
   issues,
   focusLine,
+  target,
 }: {
   file: ChangedFile;
   issues?: Map<number, ReviewIssueWithId[]>;
   focusLine?: number;
+  target?: FixTarget;
 }) {
-  const lines = file.patch ? parsePatch(file.patch) : [];
+  const lines = useMemo(() => (file.patch ? parsePatch(file.patch) : []), [file.patch]);
+  const ranges = useMemo(() => changedRanges(lines), [lines]);
+  const language = languageFor(file.path);
   return (
     <Card id={fileAnchor(file.path)} tabIndex={-1} className="min-w-0 overflow-hidden outline-none">
       <header className="flex flex-wrap items-center gap-2 border-b bg-secondary/50 px-4 py-2">
@@ -159,8 +232,8 @@ function FileDiff({
           No diff to show (binary or very large file).
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse font-mono text-xs">
+        <div className="diff-dark overflow-x-auto">
+          <table className="w-full border-collapse font-mono text-[13px] leading-6">
             <caption className="sr-only">Diff of {file.path}</caption>
             <tbody>
               {lines.map((l, idx) => {
@@ -173,44 +246,35 @@ function FileDiff({
                       tabIndex={anchor ? -1 : undefined}
                       data-has-issue={found ? 'true' : undefined}
                       className={cn(
-                        ROW_TONE[l.kind],
+                        ROW[l.kind],
                         'outline-none',
-                        found && 'border-l-4 border-l-red-500',
-                        focusLine != null &&
-                          l.newLine === focusLine &&
-                          'ring-2 ring-inset ring-amber-400',
+                        focusLine != null && l.newLine === focusLine && 'diff-row-focus',
                       )}
                     >
-                      <td className="w-10 select-none px-2 text-right text-muted-foreground">
-                        {l.oldLine ?? ''}
+                      <td
+                        className={cn('w-1 p-0', found ? `diff-bar-${worst(found)}` : BAR[l.kind])}
+                      />
+                      <td className="diff-line-no w-12 select-none pr-4 pl-3 text-right">
+                        {l.newLine ?? l.oldLine ?? ''}
                       </td>
-                      <td className="w-10 select-none px-2 text-right text-muted-foreground">
-                        {l.newLine ?? ''}
-                      </td>
-                      <td className="w-4 select-none text-center" aria-hidden>
-                        {SIGN[l.kind]}
-                      </td>
-                      <td className="whitespace-pre px-2">
+                      <td className="whitespace-pre pr-4">
                         {l.kind === 'add' && <span className="sr-only">added: </span>}
                         {l.kind === 'del' && <span className="sr-only">removed: </span>}
-                        {l.text}
+                        <Code line={l} language={language} range={ranges.get(idx)} />
                       </td>
                     </tr>
                     {found && (
                       <tr>
-                        <td colSpan={4} className="border-y bg-amber-50 px-4 py-2 font-sans">
+                        <td
+                          colSpan={3}
+                          className={`diff-issue diff-issue-${worst(found)} font-sans`}
+                        >
                           <ul
-                            className="flex flex-col gap-1"
+                            className="flex flex-col divide-y divide-white/10"
                             aria-label={`Issues on line ${l.newLine}`}
                           >
                             {found.map((i) => (
-                              <li key={i.id} className="flex flex-col gap-0.5 text-sm">
-                                <span className="flex items-center gap-2">
-                                  <SeverityBadge severity={i.severity} />
-                                  <span className="font-medium">{i.title}</span>
-                                </span>
-                                <span className="text-muted-foreground">{i.explanation}</span>
-                              </li>
+                              <IssueNote key={i.id} issue={i} target={target} />
                             ))}
                           </ul>
                         </td>

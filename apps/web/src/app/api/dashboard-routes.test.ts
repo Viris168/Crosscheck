@@ -521,6 +521,20 @@ describe('POST /api/repos/:repoId/pulls/:number/rerun', () => {
     expect(db.review.create).not.toHaveBeenCalled();
   });
 
+  it('409 and keeps the result for a completed Action review (we cannot start the workflow)', async () => {
+    db.review.findUnique.mockResolvedValue({
+      ...baseReview,
+      status: 'completed',
+      provider: 'claude_action',
+      headSha: 'head2',
+    });
+    const res = await call({ provider: 'claude_action' });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.message).toMatch(/Push a new commit/);
+    expect(db.review.updateMany).not.toHaveBeenCalled();
+    expect(db.issue.deleteMany).not.toHaveBeenCalled();
+  });
+
   it('409 while the same review is in progress', async () => {
     db.review.findUnique.mockResolvedValue({ ...baseReview, status: 'running', headSha: 'head2' });
     db.review.updateMany.mockResolvedValue({ count: 0 });
