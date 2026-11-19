@@ -18,8 +18,8 @@ export interface ReviewContext {
     status: ReviewStatus;
     provider: ProviderId;
     headSha: string;
-    /** Before finalize: the AI's own risk score (max over chunks). After: the computed score. */
-    riskScore: number | null;
+    /** The provider's own risk score (max over chunks, or the Action's result). Input to computeRisk. */
+    aiRiskScore: number | null;
     summary: string | null;
     githubReviewId: number | null;
   };
@@ -107,6 +107,7 @@ const RESET_FIELDS = {
   errorMessage: null,
   filesTotal: 0,
   filesDone: 0,
+  aiRiskScore: null,
   riskScore: null,
   riskLevel: null,
   riskFactors: Prisma.DbNull,
@@ -130,7 +131,7 @@ export const prismaJobsStore: JobsStore = {
         status: r.status,
         provider: r.provider,
         headSha: r.headSha,
-        riskScore: r.riskScore,
+        aiRiskScore: r.aiRiskScore,
         summary: r.summary,
         githubReviewId: r.githubReviewId === null ? null : Number(r.githubReviewId),
       },
@@ -214,7 +215,7 @@ export const prismaJobsStore: JobsStore = {
       where: { id: reviewId },
       data: {
         filesDone: data.filesDone,
-        riskScore: data.aiRiskScore === null ? null : Math.round(data.aiRiskScore),
+        aiRiskScore: data.aiRiskScore === null ? null : Math.round(data.aiRiskScore),
         errorCode: data.errorCode,
         errorMessage: data.errorMessage,
       },

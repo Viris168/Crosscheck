@@ -108,4 +108,4 @@ local workaround. The owner applies approved changes on `main`; then rebase.
   review-finalize reads it as `aiScores: [riskScore]` and then overwrites it with the computed score.
   **Lane D:** until this lands, ingest should also save `result.risk_score` into `riskScore` (and
   `result.summary` into `summary`) before sending `review/finalize`.
-- **Status:** open
+- **Status:** applied (PR #9 adds `Review.aiRiskScore`; jobs + ingest use it since fix/wave2-wiring)

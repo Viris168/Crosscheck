@@ -171,6 +171,8 @@ async function ingestResult(
         filesTotal: changedFiles,
         filesDone: changedFiles,
         summary: result.summary,
+        // The Action's own score; review-finalize feeds it to computeRisk.
+        aiRiskScore: Math.round(result.risk_score),
       },
     });
     if (res.count === 0) return false;

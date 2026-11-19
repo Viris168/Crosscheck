@@ -7,8 +7,8 @@ import type {
   ReviewProvider,
 } from '@app/shared';
 import type { JobDeps } from '../deps';
-import { computeRisk } from '../mocks/scoring';
-import { formatSummary, isLineInDiff } from '../mocks/github-comments';
+import { formatSummary, isLineInDiff } from '@app/github-comments';
+import { computeRisk } from '@app/scoring';
 import type { JobsStore } from '../store';
 
 export const silentLog = { info() {}, warn() {}, error() {} };

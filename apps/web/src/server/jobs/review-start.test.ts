@@ -46,7 +46,8 @@ describe('review-start', () => {
       status: 'running',
       filesTotal: 2,
       filesDone: 2,
-      riskScore: 30,
+      aiRiskScore: 30,
+      riskScore: null,
       summary: 'AI_SUMMARY chunk 0',
       errorCode: null,
     });

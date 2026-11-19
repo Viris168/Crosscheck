@@ -1,8 +1,6 @@
-import { ApiErrorSchema, HealthResponse } from '@app/shared';
+import { HealthResponse } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 import { GET as health } from './health/route';
-import { POST as ingest } from './ingest/review/route';
-import * as ingestRoute from './ingest/review/route';
 
 describe('foundation API routes', () => {
   it('GET /api/health → 200 { ok: true }', async () => {
@@ -11,14 +9,6 @@ describe('foundation API routes', () => {
     expect(HealthResponse.parse(await res.json())).toEqual({ ok: true });
   });
 
-  // webhooks/github is implemented by lane A; its tests live in src/server/github.
-  it.each([['ingest/review', ingest, ingestRoute.runtime]])(
-    'POST /api/%s is a 501 stub on the node runtime',
-    async (_name, handler, runtime) => {
-      const res = handler();
-      expect(res.status).toBe(501);
-      expect(ApiErrorSchema.parse(await res.json()).error.code).toBe('not_implemented');
-      expect(runtime).toBe('nodejs');
-    },
-  );
+  // webhooks/github (lane A) and ingest/review (lane D) are implemented; their tests live in
+  // src/server/github and src/server/ingest.
 });

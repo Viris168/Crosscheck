@@ -192,7 +192,12 @@ describe('POST /api/ingest/review', () => {
     expect(await res.json()).toEqual({ reviewId: 'rev_1', duplicate: false });
     expect(h.send).toHaveBeenCalledWith({ name: 'review/finalize', data: { reviewId: 'rev_1' } });
     const review = h.t.review[0]!;
-    expect(review).toMatchObject({ filesTotal: 4, filesDone: 4, summary: 'Looks mostly fine.' });
+    expect(review).toMatchObject({
+      filesTotal: 4,
+      filesDone: 4,
+      summary: 'Looks mostly fine.',
+      aiRiskScore: 40,
+    });
     expect(review.startedAt).toBeInstanceOf(Date);
     expect(review.status).toBe('waiting_action'); // finalize completes it
     expect(h.t.issue).toHaveLength(1);

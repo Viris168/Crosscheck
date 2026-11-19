@@ -26,7 +26,7 @@ describe('review-finalize', () => {
   it('drops out-of-diff issues, sorts + caps, scores, posts ≥ minSeverity, completes', async () => {
     const db = createFakeStore({
       status: 'running',
-      riskScore: 60,
+      aiRiskScore: 60,
       settings: { minSeverity: 'medium', maxIssuesPerPr: 3 },
       issues: [
         issue({ title: 'low-1', severity: 'low' }),
@@ -51,8 +51,9 @@ describe('review-finalize', () => {
     expect(deps.posts[0]!.issues.map((i) => i.title)).toEqual(['crit', 'med', 'high']);
     expect(deps.posts[0]!.headSha).toBe('abc123');
     expect(deps.posts[0]!.summaryBody).toContain('https://app.test/repos/repo_1/pulls/7');
-    // AI score 60 × 0.4 = 24 + issues 15 + 8 + 3 = 26 → 50
-    expect(db.review.risk).toMatchObject({ score: 50, level: 'high' });
+    // Real @app/scoring: AI 60 × 0.4 = 24 + issues 15 + 8 + 3 = 26 + source without tests 8 → 58
+    expect(db.review.risk).toMatchObject({ score: 58, level: 'high' });
+    expect(db.review.risk!.factors.map((f) => f.points)).toEqual([24, 26, 8]);
     expect(db.review).toMatchObject({ status: 'completed', githubReviewId: 9001 });
     expect(db.postedIds.size).toBe(3);
   });
