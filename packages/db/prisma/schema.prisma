@@ -278,6 +278,9 @@ model Review {
   errorMessage   String?
   filesTotal     Int          @default(0)
   filesDone      Int          @default(0)
+  /// The provider's own risk_score (max over chunks, or the Action's result). Input to computeRisk.
+  aiRiskScore    Int?
+  /// The computed platform score (computeRisk), set by review-finalize.
   riskScore      Int?
   riskLevel      RiskLevel?
   /// RiskFactor[] from @app/shared

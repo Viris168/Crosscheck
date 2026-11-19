@@ -16,6 +16,7 @@ const RESET_FIELDS = {
   errorCode: null,
   errorMessage: null,
   filesDone: 0,
+  aiRiskScore: null,
   riskScore: null,
   riskLevel: null,
   riskFactors: Prisma.DbNull,

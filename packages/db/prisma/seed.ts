@@ -42,6 +42,7 @@ const reviews: Record<ReviewStatus, Omit<Prisma.ReviewUncheckedCreateInput, 'pul
     status: 'completed',
     filesTotal: 12,
     filesDone: 12,
+    aiRiskScore: 60,
     riskScore: 64,
     riskLevel: 'high',
     riskFactors: [
