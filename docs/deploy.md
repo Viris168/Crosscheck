@@ -139,8 +139,34 @@ GitHub → Settings → Developer settings → GitHub Apps → New (or under you
   for the dashboard's Merge button), Checks **Read & write**, Metadata **Read**, Issues **Read** (for comments)
 - Raising a permission on an existing App: GitHub asks each installation's owner to accept it
   (org/user Settings → GitHub Apps → Configure → *Review request*). Until they do, Merge returns 403.
-- **Subscribe to events:** Pull request, Issue comment, Installation (always on), Installation repositories
+- **Organization permissions:** Members **Read** (sign-in sync checks GitHub org membership)
+- **Subscribe to events:** Pull request, Issue comment, Installation (always on), Installation
+  repositories, Organization, Member
+- **User-to-server tokens:** keep **Expire user authorization tokens** on (the default). Login uses the
+  App's own OAuth client (`GITHUB_CLIENT_ID`), so Better Auth stores a GitHub App user token, and the
+  sign-in sync calls `GET /user/installations` with it. Those tokens last 8 hours and come with a
+  6-month refresh token; Better Auth refreshes them
+  ([GitHub docs](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)).
+  If the refresh token has expired too, the sync can only remove access until the user signs in again.
 - Generate a **private key** (.pem) and a **client secret**. Note App ID + Client ID.
+
+<!-- VERIFY: /user/installations accepts the stored GitHub App user token; Member event needs the
+Members org permission (and how it behaves on personal installs); a missing Members permission
+answers 403 (not 404). -->
+
+#### Upgrading an existing install
+Adding Members **Read** and the Organization/Member events changes the App's permissions, so GitHub asks
+each installation's owner to accept them (GitHub emails org owners; org/user Settings → GitHub Apps →
+Configure → *Review request*). See GitHub's
+[approving updated permissions](https://docs.github.com/en/apps/using-github-apps/approving-updated-permissions-for-a-github-app).
+Until the client accepts:
+- members don't join or leave automatically (GitHub answers the membership check with an error, and
+  the platform changes nothing),
+- the org owner sees a banner on **Settings → Members**: "Accept the new GitHub App permissions to sync
+  members".
+
+Accepting sends `installation.new_permissions_accepted`, which clears the banner; members sync at their
+next sign-in or via **Check again**.
 
 ### 3.4 Secrets
 ```bash
