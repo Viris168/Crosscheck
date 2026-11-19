@@ -32,6 +32,11 @@ export const GetRepoSettingsResponse = z.object({
   provider: z.enum(ProviderId),
   settings: RepoSettingsSchema,
   hasIngestToken: z.boolean(),
+  /**
+   * true when the caller may change settings (org owner/admin, or GitHub `write`+ on the repo).
+   * Defaults to false (fail closed) for handlers that don't set it yet.
+   */
+  canEdit: z.boolean().default(false),
 });
 
 /** PUT /api/repos/:repoId/settings — full replacement. */

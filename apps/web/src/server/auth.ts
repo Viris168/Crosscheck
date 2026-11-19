@@ -6,9 +6,58 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { nextCookies } from 'better-auth/next-js';
 import { organization } from 'better-auth/plugins';
 import { env } from './env';
+import { logger } from './logger';
+
+/**
+ * Better Auth endpoints that create, update or delete orgs, members, invitations, teams or roles.
+ * GitHub is the only source of members (task H), so they answer 404. Taken from
+ * better-auth 1.7.25 `dist/plugins/organization`. Kept: `/organization/set-active` (org switcher)
+ * and the read-only endpoints (get-*, list-*, check-slug, has-permission, set-active-team).
+ */
+export const DISABLED_ORG_PATHS = [
+  '/organization/create',
+  '/organization/update',
+  '/organization/delete',
+  '/organization/leave',
+  '/organization/invite-member',
+  '/organization/accept-invitation',
+  '/organization/reject-invitation',
+  '/organization/cancel-invitation',
+  '/organization/remove-member',
+  '/organization/update-member-role',
+  '/organization/create-team',
+  '/organization/update-team',
+  '/organization/remove-team',
+  '/organization/add-team-member',
+  '/organization/remove-team-member',
+  '/organization/create-role',
+  '/organization/update-role',
+  '/organization/delete-role',
+] as const;
+
+/**
+ * `session.create.after`: ask the jobs lane to sync the user's org memberships from GitHub.
+ * Sends ids only, and never throws: a failed send must not block sign-in.
+ */
+export async function onSessionCreated(session: { userId: string }): Promise<void> {
+  const { userId } = session;
+  try {
+    // Lazy import: jobs → github → auth would otherwise be a circular import.
+    const { inngest } = await import('@/server/jobs');
+    await inngest.send({ name: 'user/signed-in', data: { userId } });
+  } catch (err) {
+    logger.warn(
+      { userId, err: err instanceof Error ? err.message : 'unknown' },
+      'user/signed-in event not sent',
+    );
+  }
+}
 
 // VERIFY: Better Auth options (additionalFields, organization `schema` option, mapProfileToUser)
 //         against the docs for the installed better-auth version.
+// VERIFY: `disabledPaths`, `account.encryptOAuthTokens`, `overrideUserInfoOnSignIn`,
+//         `allowUserToCreateOrganization` and `databaseHooks.session.create.after` were checked
+//         against the better-auth 1.7.25 source in node_modules; re-check on upgrade.
 export function createAuth() {
   const github =
     env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
@@ -16,6 +65,8 @@ export function createAuth() {
           github: {
             clientId: env.GITHUB_CLIENT_ID,
             clientSecret: env.GITHUB_CLIENT_SECRET,
+            // Re-run mapProfileToUser on every sign-in so `login`/`avatarUrl` follow GitHub renames.
+            overrideUserInfoOnSignIn: true,
             // Keep the GitHub login + avatar on our User row.
             mapProfileToUser: (profile: { login: string; avatar_url: string }) => ({
               login: profile.login,
@@ -30,6 +81,24 @@ export function createAuth() {
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
     database: prismaAdapter(prisma, { provider: 'postgresql' }),
+    // Returns 404 for every path listed (matched after the /api/auth base path).
+    disabledPaths: [...DISABLED_ORG_PATHS],
+    account: {
+      // Encrypt access/refresh tokens with BETTER_AUTH_SECRET. Existing plaintext GitHub tokens
+      // (gho_/ghu_/ghr_…) aren't hex or `$ba$`-prefixed, so better-auth reads them as-is; they are
+      // stored encrypted on the next sign-in.
+      // VERIFY: rotating BETTER_AUTH_SECRET makes stored tokens unreadable (users must sign in again).
+      encryptOAuthTokens: true,
+    },
+    databaseHooks: {
+      session: {
+        create: {
+          after: async (session) => {
+            await onSessionCreated(session);
+          },
+        },
+      },
+    },
     user: {
       additionalFields: {
         login: { type: 'string', required: false, input: false },
@@ -39,12 +108,15 @@ export function createAuth() {
     socialProviders: github,
     plugins: [
       organization({
+        // Orgs are created from GitHub App installations only (ensureOrganization), never by users.
+        allowUserToCreateOrganization: false,
         // Default roles are owner | admin | member; the creator becomes owner.
         creatorRole: 'owner',
         schema: {
           organization: {
             additionalFields: {
               githubAccountLogin: { type: 'string', required: false, input: false },
+              githubAccountType: { type: 'string', required: false, input: false },
               plan: { type: 'string', required: false, input: false, defaultValue: 'free' },
             },
           },

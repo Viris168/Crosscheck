@@ -4,9 +4,11 @@ import {
   GetRepoSettingsResponse,
   IngestRequest,
   IngestResponse,
+  ListMembersResponse,
   ListPullsQuery,
   ListPullsResponse,
   ListReposResponse,
+  MemberParams,
   OverviewQuery,
   OverviewResponse,
   PullParams,
@@ -15,6 +17,9 @@ import {
   RetryReviewResponse,
   ReviewDetailSchema,
   RotateIngestTokenResponse,
+  SyncOrgsResponse,
+  UpdateMemberBody,
+  UpdateMemberResponse,
   WorkflowPrRequest,
   WorkflowPrResponse,
 } from './index';
@@ -70,6 +75,26 @@ describe('repos API', () => {
       hasIngestToken: true,
     });
     expect(settings.settings.maxIssuesPerPr).toBe(30);
+    // canEdit defaults to false (fail closed) when a handler doesn't set it.
+    expect(settings.canEdit).toBe(false);
+    expect(
+      GetRepoSettingsResponse.parse({
+        repoId: 'r',
+        provider: 'platform',
+        settings: {},
+        hasIngestToken: false,
+        canEdit: true,
+      }).canEdit,
+    ).toBe(true);
+    expect(
+      GetRepoSettingsResponse.safeParse({
+        repoId: 'r',
+        provider: 'platform',
+        settings: {},
+        hasIngestToken: false,
+        canEdit: 'yes',
+      }).success,
+    ).toBe(false);
     expect(PutRepoSettingsRequest.safeParse({ provider: 'gpt', settings: {} }).success).toBe(false);
   });
 
@@ -203,6 +228,56 @@ describe('orgs API', () => {
       issuesBySeverity: { low: 2, medium: 1, high: 1, critical: 0 },
     });
     expect(o.range).toBe('90d');
+  });
+});
+
+describe('members API', () => {
+  const member = {
+    id: 'm1',
+    userId: 'u1',
+    login: 'octocat',
+    name: 'Octo Cat',
+    avatarUrl: null,
+    role: 'member',
+  };
+
+  it('member params need orgId and memberId', () => {
+    expect(MemberParams.parse({ orgId: 'o', memberId: 'm' })).toEqual({
+      orgId: 'o',
+      memberId: 'm',
+    });
+    expect(MemberParams.safeParse({ orgId: 'o' }).success).toBe(false);
+    expect(MemberParams.safeParse({ orgId: 'o', memberId: '' }).success).toBe(false);
+  });
+
+  it('parses a member list', () => {
+    const r = ListMembersResponse.parse({
+      members: [member, { ...member, id: 'm2', login: null, role: 'owner' }],
+      needsMemberPermission: true,
+    });
+    expect(r.members).toHaveLength(2);
+    expect(ListMembersResponse.safeParse({ members: [member] }).success).toBe(false);
+    expect(
+      ListMembersResponse.safeParse({
+        members: [{ ...member, role: 'superuser' }],
+        needsMemberPermission: false,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('update member body/response', () => {
+    expect(UpdateMemberBody.parse({ role: 'admin' }).role).toBe('admin');
+    expect(UpdateMemberBody.safeParse({ role: 'root' }).success).toBe(false);
+    expect(UpdateMemberBody.safeParse({}).success).toBe(false);
+    expect(UpdateMemberResponse.parse({ member }).member.id).toBe('m1');
+  });
+
+  it('sync orgs response', () => {
+    expect(SyncOrgsResponse.parse({ joined: ['o1'], left: [] })).toEqual({
+      joined: ['o1'],
+      left: [],
+    });
+    expect(SyncOrgsResponse.safeParse({ joined: ['o1'] }).success).toBe(false);
   });
 });
 
