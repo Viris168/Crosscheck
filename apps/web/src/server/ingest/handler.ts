@@ -104,7 +104,12 @@ async function findOrCreateReview(
       select: REVIEW_SELECT,
     });
 
-  const pick = (rows: ReviewRow[]) => rows.find((r) => r.provider === repo.provider) ?? rows[0];
+  // Same provider as the repo first; else one still waiting (another Action provider was re-run on
+  // this commit); else the newest, which then yields a clear 409.
+  const pick = (rows: ReviewRow[]) =>
+    rows.find((r) => r.provider === repo.provider) ??
+    rows.find((r) => r.status === 'waiting_action') ??
+    rows[0];
 
   const existing = pick(await find());
   if (existing) return existing;
