@@ -81,6 +81,30 @@ review its PR, so each model checks the other.
 > Action) → comments appear → dashboard shows completed state + risk score; check the runs in the Inngest
 > dashboard. Fix wiring bugs only; file anything bigger as a task. Add an e2e test script in `scripts/e2e.ts`.
 
+## Task H — Members and repo access from GitHub
+Spec: `tasks/H-repo-collaborators.md` (every H agent reads it). One task file per agent, three waves;
+start a wave only when the previous one is merged.
+
+| Wave | Agents (task files) |
+|---|---|
+| 1 | `H0-contracts.md` (Foundation) · `H1-permissions.md` (A) · `H6-app-permissions-docs.md` (G) |
+| 2 | `H2-membership.md` (A) · `H3-repo-access.md` (F) · `H4-members-page.md` (F) |
+| 3 | `H5a-signin-job.md` (B) · `H5b-check-again.md` (F), then one integration pass |
+
+```bash
+git pull
+git worktree add ../app-H0 -b feat/h0-contracts
+git worktree add ../app-H1 -b feat/h1-permissions
+git worktree add ../app-H6 -b feat/h6-app-permissions-docs
+cd ../app-H0 && pnpm install && claude
+```
+First message to each agent (swap the task file):
+> Read CLAUDE.md, docs/tech-stack.md, tasks/H-repo-collaborators.md and tasks/H0-contracts.md. Do only your
+> task, only inside the paths your task file lists. Run the tests, then open a PR listing your `// VERIFY:` items.
+
+Integration pass (after wave 3): with the GitHub App's new permissions accepted on a test org, check every
+item under "Done when" in `tasks/H-repo-collaborators.md` with real accounts.
+
 ## Clean up
 ```bash
 git worktree remove ../app-A
