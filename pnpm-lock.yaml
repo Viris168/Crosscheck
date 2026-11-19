@@ -80,6 +80,9 @@ importers:
       '@app/github':
         specifier: workspace:*
         version: link:../../packages/github
+      '@app/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@app/shared':
         specifier: workspace:*
         version: link:../../packages/shared
