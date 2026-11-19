@@ -12,7 +12,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@app/shared": "workspace:*"
+    "@app/github": "workspace:*",
+    "@app/providers": "workspace:*",
+    "@app/shared": "workspace:*",
+    "yaml": "^2.8.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",

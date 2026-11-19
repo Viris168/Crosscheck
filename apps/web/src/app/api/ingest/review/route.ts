@@ -1,10 +1,8 @@
-import { errorBody } from '@app/shared';
+import { handleIngestReview } from '@/server/ingest';
 
 export const runtime = 'nodejs';
 
-// Stub — lane D replaces this with the ingest handler from '@/server/ingest'.
-export function POST(): Response {
-  return Response.json(errorBody('not_implemented', 'Review ingest is not implemented yet'), {
-    status: 501,
-  });
+/** Results from the user's Claude / Codex GitHub Action (Bearer rit_… ingest token). */
+export async function POST(req: Request): Promise<Response> {
+  return handleIngestReview(req);
 }
