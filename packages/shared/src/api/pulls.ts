@@ -83,3 +83,18 @@ export const RerunResponse = z.object({
   reviewId: Id,
   status: z.enum(ReviewStatus),
 });
+
+export const MergeMethod = ['merge', 'squash', 'rebase'] as const;
+export type MergeMethod = (typeof MergeMethod)[number];
+
+/**
+ * POST /api/repos/:repoId/pulls/:number/merge — org owner/admin only. Merges the PR on GitHub at the
+ * head that was reviewed; 409 if the latest review of the current head is not completed.
+ */
+export const MergeRequest = z.object({
+  method: z.enum(MergeMethod).default('merge'),
+});
+export const MergeResponse = z.object({
+  merged: z.literal(true),
+  sha: z.string(),
+});
