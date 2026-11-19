@@ -70,7 +70,15 @@ export function RiskBadge({ level, score }: { level: RiskLevel; score?: number |
 
 const SEVERITY_TONE: Record<Severity, BadgeTone> = RISK_TONE;
 
-export function SeverityBadge({ severity }: { severity: Severity }) {
+export function SeverityBadge({ severity, glass }: { severity: Severity; glass?: boolean }) {
+  // Glass: translucent pill with a glowing dot, for dark surfaces (styles in globals.css).
+  if (glass) {
+    return (
+      <span className={`glass-badge glass-${severity}`} data-severity={severity}>
+        {SEVERITY_LABEL[severity]}
+      </span>
+    );
+  }
   return <Badge tone={SEVERITY_TONE[severity]}>{SEVERITY_LABEL[severity]}</Badge>;
 }
 

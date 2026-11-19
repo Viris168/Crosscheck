@@ -80,3 +80,226 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ---------------------------------------------------------------- diff (Claude Code dark) */
+/* Changed-files diff: always dark, like Claude Code's diff view, in light and dark app themes. */
+.diff-dark {
+  --diff-bg: #1f1e1d;
+  --diff-fg: #e8e6e3;
+  --diff-muted: #7a7874;
+  --diff-hunk-bg: #2a2928;
+  --diff-add-bg: rgb(34 92 43 / 0.42);
+  --diff-add-word: rgb(56 166 96 / 0.5);
+  --diff-add-bar: #4caf6a;
+  --diff-del-bg: rgb(160 38 56 / 0.55);
+  --diff-del-word: rgb(226 82 104 / 0.65);
+  --diff-del-bar: #ff5c74;
+  --sev-critical: #ff4d63;
+  --sev-high: #ff7a59;
+  --sev-medium: #f2b33d;
+  --sev-low: #8fa3bf;
+  background: var(--diff-bg);
+  color: var(--diff-fg);
+}
+.diff-dark .diff-line-no {
+  color: var(--diff-muted);
+}
+.diff-dark .diff-row-add {
+  background: var(--diff-add-bg);
+}
+.diff-dark .diff-row-del {
+  background: var(--diff-del-bg);
+}
+.diff-dark .diff-row-add .diff-word {
+  background: var(--diff-add-word);
+  border-radius: 2px;
+}
+.diff-dark .diff-row-del .diff-word {
+  background: var(--diff-del-word);
+  border-radius: 2px;
+}
+.diff-dark .diff-row-hunk,
+.diff-dark .diff-row-meta {
+  background: var(--diff-hunk-bg);
+  color: var(--diff-muted);
+}
+.diff-dark .diff-bar-add {
+  background: var(--diff-add-bar);
+}
+.diff-dark .diff-bar-del {
+  background: repeating-linear-gradient(-45deg, var(--diff-del-bar) 0 2px, transparent 2px 4px);
+}
+.diff-dark .diff-row-focus {
+  box-shadow: inset 0 0 0 2px var(--sev-medium);
+}
+
+/* Findings under a diff line, tinted by the most severe one. */
+.diff-dark .diff-bar-critical {
+  background: var(--sev-critical);
+  box-shadow: 0 0 8px var(--sev-critical);
+}
+.diff-dark .diff-bar-high {
+  background: var(--sev-high);
+}
+.diff-dark .diff-bar-medium {
+  background: var(--sev-medium);
+}
+.diff-dark .diff-bar-low {
+  background: var(--sev-low);
+}
+.diff-dark .diff-issue {
+  --sev: var(--sev-medium);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--sev) 24%, #1f1e1d),
+    color-mix(in srgb, var(--sev) 10%, #1f1e1d)
+  );
+  border-left: 4px solid var(--sev);
+  border-top: 1px solid color-mix(in srgb, var(--sev) 40%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--sev) 40%, transparent);
+  color: #f4f2ee;
+}
+.diff-dark .diff-issue-critical {
+  --sev: var(--sev-critical);
+}
+.diff-dark .diff-issue-high {
+  --sev: var(--sev-high);
+}
+.diff-dark .diff-issue-medium {
+  --sev: var(--sev-medium);
+}
+.diff-dark .diff-issue-low {
+  --sev: var(--sev-low);
+}
+.diff-dark .diff-issue-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+.diff-dark .diff-issue-text {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: #ebe8e3;
+}
+.diff-dark .diff-issue-fix summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #d7d3cc;
+}
+.diff-dark .diff-issue-fix summary:hover {
+  color: #ffffff;
+}
+.diff-dark .diff-issue-fix pre {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: rgb(0 0 0 / 0.35);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: #e8e6e3;
+}
+
+/* Glass status pills: translucent tint, light edge, soft glow. */
+.glass-badge,
+.glass-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 9999px;
+  padding: 0.15rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  background-image: linear-gradient(135deg, rgb(255 255 255 / 0.18), rgb(255 255 255 / 0.03));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 4px 14px rgb(0 0 0 / 0.3);
+  backdrop-filter: blur(10px) saturate(160%);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+}
+.glass-badge::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 9999px;
+  background: var(--glass);
+  box-shadow: 0 0 8px var(--glass);
+}
+.glass-badge {
+  color: color-mix(in srgb, var(--glass) 35%, #ffffff);
+  background-color: color-mix(in srgb, var(--glass) 22%, transparent);
+  border-color: color-mix(in srgb, var(--glass) 45%, rgb(255 255 255 / 0.25));
+}
+.glass-critical {
+  --glass: #ff4d63;
+}
+.glass-high {
+  --glass: #ff7a59;
+}
+.glass-medium {
+  --glass: #f2b33d;
+}
+.glass-low {
+  --glass: #8fa3bf;
+}
+.glass-chip {
+  color: #e6e3de;
+  background-color: rgb(255 255 255 / 0.06);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+/* Syntax colours (highlight.js scopes). */
+.diff-dark .hljs-keyword,
+.diff-dark .hljs-meta .hljs-keyword,
+.diff-dark .hljs-selector-tag {
+  color: #8f9cf9;
+}
+.diff-dark .hljs-built_in,
+.diff-dark .hljs-type,
+.diff-dark .hljs-class .hljs-title,
+.diff-dark .hljs-title.class_ {
+  color: #4ec9b0;
+}
+.diff-dark .hljs-title,
+.diff-dark .hljs-title.function_,
+.diff-dark .hljs-section {
+  color: #61afef;
+}
+.diff-dark .hljs-string,
+.diff-dark .hljs-regexp,
+.diff-dark .hljs-template-tag {
+  color: #e4a272;
+}
+.diff-dark .hljs-number,
+.diff-dark .hljs-literal,
+.diff-dark .hljs-symbol {
+  color: #c6a5f4;
+}
+.diff-dark .hljs-params,
+.diff-dark .hljs-variable,
+.diff-dark .hljs-template-variable,
+.diff-dark .hljs-attr,
+.diff-dark .hljs-attribute,
+.diff-dark .hljs-property {
+  color: #e8b77d;
+}
+.diff-dark .hljs-comment,
+.diff-dark .hljs-quote {
+  color: #7f848e;
+  font-style: italic;
+}
+.diff-dark .hljs-meta,
+.diff-dark .hljs-tag,
+.diff-dark .hljs-name {
+  color: #e06c75;
+}
+.diff-dark .hljs-subst {
+  color: var(--diff-fg);
+}

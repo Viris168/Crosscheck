@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filesTabHref, lineAnchor, parsePatch } from './diff';
+import { changedRanges, filesTabHref, lineAnchor, parsePatch } from './diff';
 
 describe('parsePatch', () => {
   it('numbers old/new lines across hunks', () => {
@@ -34,5 +34,33 @@ describe('anchors', () => {
       '/p?tab=files&file=a.ts&line=2&review=rev#diff-a_ts-R2',
     );
     expect(filesTabHref('/p', 'a.ts')).toBe('/p?tab=files&file=a.ts#file-a_ts');
+  });
+});
+
+describe('changedRanges', () => {
+  it('pairs deleted/added lines in a block and marks only the changed middle', () => {
+    const lines = parsePatch(
+      '@@ -1,3 +1,3 @@\n ctx\n-  return "Hello, " + name;\n+  return `Hello, ${name}!`;\n-gone\n',
+    );
+    const ranges = changedRanges(lines);
+    // del at index 2, add at index 3: shared prefix "  return " and suffix ";"
+    expect(ranges.get(2)).toEqual([9, 25]);
+    expect(ranges.get(3)).toEqual([9, 26]);
+    expect(ranges.has(4)).toBe(false); // unpaired deletion
+  });
+
+  it('pairs by similarity when an inserted line shifts the block', () => {
+    const lines = parsePatch(
+      '@@ -1,2 +1,3 @@\n-function greet(name) {\n-  return "Hi " + name;\n+// docs\n+function greet(name: string) {\n+  return `Hi ${name}`;',
+    );
+    const ranges = changedRanges(lines);
+    expect(ranges.has(3)).toBe(false); // the inserted comment
+    expect(ranges.get(1)).toEqual([19, 19]); // "function greet(name" | ": string" | ") {"
+    expect(ranges.get(4)).toEqual([19, 27]);
+    expect(ranges.has(2) && ranges.has(5)).toBe(true);
+  });
+
+  it('skips pairs with nothing in common', () => {
+    expect(changedRanges(parsePatch('@@ -1 +1 @@\n-abc\n+xyz')).size).toBe(0);
   });
 });
