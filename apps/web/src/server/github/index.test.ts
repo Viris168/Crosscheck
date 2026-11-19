@@ -16,6 +16,7 @@ const h = vi.hoisted(() => {
     send: vi.fn(async () => ({ ids: ['evt'] })),
     getInstallationOctokit: vi.fn(async () => ({})),
     fetchPullRequest: vi.fn(),
+    syncUserMemberships: vi.fn(async () => ({ joined: [] as string[], left: [] as string[] })),
   };
 });
 
@@ -26,6 +27,7 @@ vi.mock('@app/db', () => ({
   ),
 }));
 vi.mock('@/server/jobs', () => ({ inngest: { send: h.send } }));
+vi.mock('./membership', () => ({ syncUserMemberships: h.syncUserMemberships }));
 vi.mock('@/server/redis', () => ({
   getRedis: () => ({
     set: async (key: string, value: string, _ex: string, _ttl: number, nx: string) => {
@@ -112,6 +114,7 @@ beforeEach(() => {
   h.send.mockReset().mockResolvedValue({ ids: ['evt'] });
   h.getInstallationOctokit.mockClear();
   h.fetchPullRequest.mockReset();
+  h.syncUserMemberships.mockClear();
   // alice has signed in with GitHub before installing the app.
   fake.tables.account.push({
     id: 'acc1',
@@ -221,6 +224,39 @@ describe('installation events', () => {
     expect(fake.tables.member).toEqual([
       expect.objectContaining({ organizationId: org!.id, userId: 'user-alice', role: 'owner' }),
     ]);
+    expect(org!.githubAccountType).toBe('Organization');
+  });
+
+  it('created: a personal account stores githubAccountType User', async () => {
+    const p = fixture('installation.created');
+    p.installation.account = { login: 'carol', id: 5002, type: 'User' };
+    await deliver('installation', p);
+    expect(fake.tables.organization[0]).toMatchObject({
+      githubAccountLogin: 'carol',
+      githubAccountType: 'User',
+    });
+  });
+
+  it('new_permissions_accepted: sets githubAccountType on an old org and clears needsMemberPermission', async () => {
+    await install();
+    const org = fake.tables.organization[0]!;
+    org.githubAccountType = null;
+    fake.tables.installation[0]!.needsMemberPermission = true;
+
+    const r = await deliver('installation', {
+      ...fixture('installation.created'),
+      action: 'new_permissions_accepted',
+    });
+    expect(r.status).toBe(200);
+    expect(org.githubAccountType).toBe('Organization');
+    expect(fake.tables.installation[0]!.needsMemberPermission).toBe(false);
+  });
+
+  it('created again (not new_permissions_accepted) leaves needsMemberPermission alone', async () => {
+    await install();
+    fake.tables.installation[0]!.needsMemberPermission = true;
+    await deliver('installation', fixture('installation.created'));
+    expect(fake.tables.installation[0]!.needsMemberPermission).toBe(true);
   });
 
   it('created: links to an existing org by githubAccountLogin (case-insensitive)', async () => {
@@ -510,6 +546,123 @@ describe('issue_comment /review', () => {
       headSha: 'd'.repeat(40),
     });
     expect(fake.tables.review[0]).toMatchObject({ headSha: 'd'.repeat(40) });
+  });
+});
+
+// ---------------------------------------------------------------- organization + member events
+
+describe('organization events', () => {
+  beforeEach(async () => {
+    await install(); // alice is owner of Acme
+    fake.tables.account.push({
+      id: 'acc2',
+      providerId: 'github',
+      accountId: '7002',
+      userId: 'u-bob',
+    });
+    const orgId = fake.tables.organization[0]!.id;
+    fake.tables.member.push({ id: 'm-bob', organizationId: orgId, userId: 'u-bob', role: 'admin' });
+  });
+
+  it("member_removed deletes that user's Member row (matched by GitHub id)", async () => {
+    const r = await deliver('organization', fixture('organization.member_removed'));
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ handled: true, note: 'member removed' });
+    expect(fake.tables.member.map((m) => m.userId)).toEqual(['user-alice']);
+  });
+
+  it('matches the org login case-insensitively', async () => {
+    const p = fixture('organization.member_removed');
+    p.organization.login = 'ACME';
+    await deliver('organization', p);
+    expect(fake.tables.member.map((m) => m.userId)).toEqual(['user-alice']);
+  });
+
+  it('matches the user by GitHub id, never by login', async () => {
+    const p = fixture('organization.member_removed');
+    p.membership.user = { login: 'bob', id: 9999 };
+    const r = await deliver('organization', p);
+    expect(r.body).toMatchObject({ handled: false, note: 'unknown user' });
+    expect(fake.tables.member).toHaveLength(2);
+  });
+
+  it('an unknown organization is a no-op', async () => {
+    const p = fixture('organization.member_removed');
+    p.organization.login = 'Elsewhere';
+    const r = await deliver('organization', p);
+    expect(r.body).toMatchObject({ handled: false });
+    expect(fake.tables.member).toHaveLength(2);
+  });
+
+  it('member_added does nothing (they join at next sign-in)', async () => {
+    const r = await deliver('organization', {
+      ...fixture('organization.member_removed'),
+      action: 'member_added',
+    });
+    expect(r.body).toMatchObject({ handled: false });
+    expect(fake.tables.member).toHaveLength(2);
+    expect(h.syncUserMemberships).not.toHaveBeenCalled();
+  });
+
+  it('rejects a payload without an organization (400)', async () => {
+    const r = await deliver('organization', { action: 'member_removed' });
+    expect(r.status).toBe(400);
+  });
+});
+
+describe('member events (repo collaborators)', () => {
+  beforeEach(async () => {
+    await install();
+    fake.tables.account.push({
+      id: 'acc2',
+      providerId: 'github',
+      accountId: '7002',
+      userId: 'u-bob',
+    });
+    h.redisStore.set('gh:perm:2001:bob', 'write');
+    h.redisStore.set('gh:perm:2002:bob', 'write');
+  });
+
+  it.each(['removed', 'edited'])('%s invalidates the cached repo permission', async (action) => {
+    const r = await deliver('member', { ...fixture('member.removed'), action });
+    expect(r.status).toBe(200);
+    expect(h.redisStore.has('gh:perm:2001:bob')).toBe(false);
+    expect(h.redisStore.has('gh:perm:2002:bob')).toBe(true);
+  });
+
+  it('invalidates using a lower-cased login', async () => {
+    const p = fixture('member.removed');
+    p.member.login = 'Bob';
+    await deliver('member', p);
+    expect(h.redisStore.has('gh:perm:2001:bob')).toBe(false);
+  });
+
+  it('on an org install it does not run the membership sync', async () => {
+    await deliver('member', fixture('member.removed'));
+    expect(h.syncUserMemberships).not.toHaveBeenCalled();
+  });
+
+  it("on a personal install it also syncs that user's memberships", async () => {
+    fake.tables.organization[0]!.githubAccountType = 'User';
+    const r = await deliver('member', fixture('member.removed'));
+    expect(r.status).toBe(200);
+    expect(h.syncUserMemberships).toHaveBeenCalledWith('u-bob');
+  });
+
+  it('an unknown user is a no-op', async () => {
+    fake.tables.organization[0]!.githubAccountType = 'User';
+    const p = fixture('member.removed');
+    p.member.id = 9999;
+    const r = await deliver('member', p);
+    expect(r.body).toMatchObject({ handled: false, note: 'unknown user' });
+    expect(h.redisStore.has('gh:perm:2001:bob')).toBe(true);
+    expect(h.syncUserMemberships).not.toHaveBeenCalled();
+  });
+
+  it('ignores member.added', async () => {
+    const r = await deliver('member', { ...fixture('member.removed'), action: 'added' });
+    expect(r.body).toMatchObject({ handled: false });
+    expect(h.redisStore.has('gh:perm:2001:bob')).toBe(true);
   });
 });
 

@@ -1,0 +1,13 @@
+{
+  "action": "member_removed",
+  "membership": {
+    "url": "https://api.github.com/orgs/Acme/memberships/bob",
+    "state": "active",
+    "role": "member",
+    "organization_url": "https://api.github.com/orgs/Acme",
+    "user": { "login": "bob", "id": 7002, "type": "User" }
+  },
+  "organization": { "login": "Acme", "id": 5001 },
+  "installation": { "id": 1001 },
+  "sender": { "login": "alice", "id": 7001, "type": "User" }
+}

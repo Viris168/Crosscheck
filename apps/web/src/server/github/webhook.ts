@@ -9,6 +9,8 @@ import {
   handleInstallation,
   handleInstallationRepositories,
   handleIssueComment,
+  handleMember,
+  handleOrganization,
   handlePullRequest,
   type HandlerResult,
 } from './handlers';
@@ -22,6 +24,8 @@ const HANDLERS: Record<string, (body: unknown) => Promise<HandlerResult>> = {
   installation_repositories: handleInstallationRepositories,
   pull_request: handlePullRequest,
   issue_comment: handleIssueComment,
+  organization: handleOrganization,
+  member: handleMember,
 };
 
 /**

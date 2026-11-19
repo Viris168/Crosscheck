@@ -82,3 +82,25 @@ export const IssueCommentPayload = z.object({
   sender: Sender.optional(),
 });
 export type IssueCommentPayload = z.infer<typeof IssueCommentPayload>;
+
+const GithubUser = z.object({ id: z.number().int(), login: z.string().min(1) });
+
+/** `organization` event. `membership` is present on member_added / member_removed / member_invited. */
+// VERIFY: shape against https://docs.github.com/webhooks/webhook-events-and-payloads#organization
+export const OrganizationPayload = z.object({
+  action: z.string(),
+  membership: z.object({ user: GithubUser.nullable() }).optional(),
+  organization: z.object({ id: z.number().int(), login: z.string().min(1) }),
+  installation: InstallationRef.optional(),
+});
+export type OrganizationPayload = z.infer<typeof OrganizationPayload>;
+
+/** `member` event: a repository collaborator was added, removed or had their permission edited. */
+// VERIFY: shape against https://docs.github.com/webhooks/webhook-events-and-payloads#member
+export const MemberPayload = z.object({
+  action: z.string(),
+  member: GithubUser,
+  repository: Repository,
+  installation: InstallationRef.optional(),
+});
+export type MemberPayload = z.infer<typeof MemberPayload>;
