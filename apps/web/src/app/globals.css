@@ -80,3 +80,113 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ---------------------------------------------------------------- diff (Claude Code dark) */
+/* Changed-files diff: always dark, like Claude Code's diff view, in light and dark app themes. */
+.diff-dark {
+  --diff-bg: #1f1e1d;
+  --diff-fg: #e8e6e3;
+  --diff-muted: #7a7874;
+  --diff-hunk-bg: #2a2928;
+  --diff-add-bg: rgb(34 92 43 / 0.42);
+  --diff-add-word: rgb(56 166 96 / 0.5);
+  --diff-add-bar: #4caf6a;
+  --diff-del-bg: rgb(122 41 54 / 0.45);
+  --diff-del-word: rgb(179 89 107 / 0.55);
+  --diff-del-bar: #d9677a;
+  --diff-issue-bg: #2d2717;
+  --diff-issue-bar: #e0a33a;
+  background: var(--diff-bg);
+  color: var(--diff-fg);
+}
+.diff-dark .diff-line-no {
+  color: var(--diff-muted);
+}
+.diff-dark .diff-row-add {
+  background: var(--diff-add-bg);
+}
+.diff-dark .diff-row-del {
+  background: var(--diff-del-bg);
+}
+.diff-dark .diff-row-add .diff-word {
+  background: var(--diff-add-word);
+  border-radius: 2px;
+}
+.diff-dark .diff-row-del .diff-word {
+  background: var(--diff-del-word);
+  border-radius: 2px;
+}
+.diff-dark .diff-row-hunk,
+.diff-dark .diff-row-meta {
+  background: var(--diff-hunk-bg);
+  color: var(--diff-muted);
+}
+.diff-dark .diff-bar-add {
+  background: var(--diff-add-bar);
+}
+.diff-dark .diff-bar-del {
+  background: repeating-linear-gradient(-45deg, var(--diff-del-bar) 0 2px, transparent 2px 4px);
+}
+.diff-dark .diff-bar-issue {
+  background: var(--diff-issue-bar);
+}
+.diff-dark .diff-row-focus {
+  box-shadow: inset 0 0 0 2px var(--diff-issue-bar);
+}
+.diff-dark .diff-issue {
+  background: var(--diff-issue-bg);
+  border-left: 4px solid var(--diff-issue-bar);
+  color: var(--diff-fg);
+}
+.diff-dark .diff-issue-text {
+  color: #b9b6b0;
+}
+
+/* Syntax colours (highlight.js scopes). */
+.diff-dark .hljs-keyword,
+.diff-dark .hljs-meta .hljs-keyword,
+.diff-dark .hljs-selector-tag {
+  color: #8f9cf9;
+}
+.diff-dark .hljs-built_in,
+.diff-dark .hljs-type,
+.diff-dark .hljs-class .hljs-title,
+.diff-dark .hljs-title.class_ {
+  color: #4ec9b0;
+}
+.diff-dark .hljs-title,
+.diff-dark .hljs-title.function_,
+.diff-dark .hljs-section {
+  color: #61afef;
+}
+.diff-dark .hljs-string,
+.diff-dark .hljs-regexp,
+.diff-dark .hljs-template-tag {
+  color: #e4a272;
+}
+.diff-dark .hljs-number,
+.diff-dark .hljs-literal,
+.diff-dark .hljs-symbol {
+  color: #c6a5f4;
+}
+.diff-dark .hljs-params,
+.diff-dark .hljs-variable,
+.diff-dark .hljs-template-variable,
+.diff-dark .hljs-attr,
+.diff-dark .hljs-attribute,
+.diff-dark .hljs-property {
+  color: #e8b77d;
+}
+.diff-dark .hljs-comment,
+.diff-dark .hljs-quote {
+  color: #7f848e;
+  font-style: italic;
+}
+.diff-dark .hljs-meta,
+.diff-dark .hljs-tag,
+.diff-dark .hljs-name {
+  color: #e06c75;
+}
+.diff-dark .hljs-subst {
+  color: var(--diff-fg);
+}

@@ -6,7 +6,8 @@ import { Fragment, useEffect, useMemo } from 'react';
 import type { z } from 'zod';
 import { DiffStat, SeverityBadge } from '@/components/chips';
 import { Card } from '@/components/ui/card';
-import { fileAnchor, lineAnchor, parsePatch } from '@/lib/diff';
+import { changedRanges, fileAnchor, lineAnchor, parsePatch, type DiffLine } from '@/lib/diff';
+import { highlightLine, languageFor, markRange } from '@/lib/highlight';
 import { cn } from '@/lib/utils';
 
 type ChangedFile = z.infer<typeof ChangedFileSchema>;
@@ -121,14 +122,38 @@ function FileTree({
   );
 }
 
-const ROW_TONE = {
-  add: 'bg-green-50',
-  del: 'bg-red-50',
+/** Row / side-bar classes per line kind; colours live in globals.css (`.diff-dark`). */
+const ROW = {
+  add: 'diff-row-add',
+  del: 'diff-row-del',
   context: '',
-  hunk: 'bg-blue-50 text-blue-900',
-  meta: 'text-muted-foreground',
+  hunk: 'diff-row-hunk',
+  meta: 'diff-row-meta',
 } as const;
-const SIGN = { add: '+', del: '−', context: ' ', hunk: '', meta: '' } as const;
+const BAR = { add: 'diff-bar-add', del: 'diff-bar-del', context: '', hunk: '', meta: '' } as const;
+
+/** One diff line: syntax-highlighted, with the changed characters of a paired edit marked. */
+function Code({
+  line,
+  language,
+  range,
+}: {
+  line: DiffLine;
+  language?: string;
+  range?: [number, number];
+}) {
+  if (line.kind === 'hunk' || line.kind === 'meta') return <>{line.text}</>;
+  const segments = highlightLine(line.text, language);
+  return (
+    <>
+      {(range ? markRange(segments, range) : segments).map((seg, i) => (
+        <span key={i} className={cn(seg.cls, seg.mark && 'diff-word')}>
+          {seg.text}
+        </span>
+      ))}
+    </>
+  );
+}
 
 function FileDiff({
   file,
@@ -139,7 +164,9 @@ function FileDiff({
   issues?: Map<number, ReviewIssueWithId[]>;
   focusLine?: number;
 }) {
-  const lines = file.patch ? parsePatch(file.patch) : [];
+  const lines = useMemo(() => (file.patch ? parsePatch(file.patch) : []), [file.patch]);
+  const ranges = useMemo(() => changedRanges(lines), [lines]);
+  const language = languageFor(file.path);
   return (
     <Card id={fileAnchor(file.path)} tabIndex={-1} className="min-w-0 overflow-hidden outline-none">
       <header className="flex flex-wrap items-center gap-2 border-b bg-secondary/50 px-4 py-2">
@@ -159,8 +186,8 @@ function FileDiff({
           No diff to show (binary or very large file).
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse font-mono text-xs">
+        <div className="diff-dark overflow-x-auto">
+          <table className="w-full border-collapse font-mono text-[13px] leading-6">
             <caption className="sr-only">Diff of {file.path}</caption>
             <tbody>
               {lines.map((l, idx) => {
@@ -173,32 +200,24 @@ function FileDiff({
                       tabIndex={anchor ? -1 : undefined}
                       data-has-issue={found ? 'true' : undefined}
                       className={cn(
-                        ROW_TONE[l.kind],
+                        ROW[l.kind],
                         'outline-none',
-                        found && 'border-l-4 border-l-red-500',
-                        focusLine != null &&
-                          l.newLine === focusLine &&
-                          'ring-2 ring-inset ring-amber-400',
+                        focusLine != null && l.newLine === focusLine && 'diff-row-focus',
                       )}
                     >
-                      <td className="w-10 select-none px-2 text-right text-muted-foreground">
-                        {l.oldLine ?? ''}
+                      <td className={cn('w-1 p-0', found ? 'diff-bar-issue' : BAR[l.kind])} />
+                      <td className="diff-line-no w-12 select-none pr-4 pl-3 text-right">
+                        {l.newLine ?? l.oldLine ?? ''}
                       </td>
-                      <td className="w-10 select-none px-2 text-right text-muted-foreground">
-                        {l.newLine ?? ''}
-                      </td>
-                      <td className="w-4 select-none text-center" aria-hidden>
-                        {SIGN[l.kind]}
-                      </td>
-                      <td className="whitespace-pre px-2">
+                      <td className="whitespace-pre pr-4">
                         {l.kind === 'add' && <span className="sr-only">added: </span>}
                         {l.kind === 'del' && <span className="sr-only">removed: </span>}
-                        {l.text}
+                        <Code line={l} language={language} range={ranges.get(idx)} />
                       </td>
                     </tr>
                     {found && (
                       <tr>
-                        <td colSpan={4} className="border-y bg-amber-50 px-4 py-2 font-sans">
+                        <td colSpan={3} className="diff-issue px-4 py-2 font-sans">
                           <ul
                             className="flex flex-col gap-1"
                             aria-label={`Issues on line ${l.newLine}`}
@@ -209,7 +228,7 @@ function FileDiff({
                                   <SeverityBadge severity={i.severity} />
                                   <span className="font-medium">{i.title}</span>
                                 </span>
-                                <span className="text-muted-foreground">{i.explanation}</span>
+                                <span className="diff-issue-text">{i.explanation}</span>
                               </li>
                             ))}
                           </ul>
