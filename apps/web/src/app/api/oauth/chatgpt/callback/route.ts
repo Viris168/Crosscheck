@@ -1,4 +1,5 @@
 import { prisma } from '@app/db';
+import { chatgptOAuth } from '@app/providers';
 import { ChatGptCallbackQuery, encrypt, HttpError, safeEqual } from '@app/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 import {
@@ -7,7 +8,6 @@ import {
   decodePending,
   safeReturnTo,
 } from '@/lib/server/oauth-state';
-import { chatgptOAuth } from '@/lib/stubs';
 import { auth, requireOrgMember } from '@/server/auth';
 import { env } from '@/server/env';
 import { logger } from '@/server/logger';
@@ -44,10 +44,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     }
 
     await requireOrgMember(session.user.id, pending.orgId);
-    const tokens = await chatgptOAuth.exchangeCode({
-      code: query.data.code,
+    const tokens = await chatgptOAuth.exchangeCode(query.data.code, redirectUri(), {
       codeVerifier: pending.verifier,
-      redirectUri: redirectUri(),
     });
 
     const data = {

@@ -18,6 +18,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------- mocks
 
+process.env.PUBLIC_URL ??= 'http://localhost:3000';
+
 const db = vi.hoisted(() => {
   const fn = () => vi.fn();
   return {
@@ -68,6 +70,26 @@ vi.mock('@/server/auth', () => ({
 
 const send = vi.hoisted(() => vi.fn());
 vi.mock('@/server/jobs', () => ({ inngest: { send } }));
+
+const gh = vi.hoisted(() => ({
+  octokit: { tag: 'installation-octokit' },
+  getInstallationOctokit: vi.fn(),
+  fetchPullRequestFiles: vi.fn(),
+  openWorkflowPR: vi.fn(),
+  renderWorkflow: vi.fn(),
+}));
+vi.mock('@app/github', () => ({
+  getInstallationOctokit: gh.getInstallationOctokit,
+  fetchPullRequestFiles: gh.fetchPullRequestFiles,
+  splitFullName: (n: string) => {
+    const [owner, repo] = n.split('/');
+    return { owner, repo };
+  },
+}));
+vi.mock('@app/workflow-templates', () => ({
+  openWorkflowPR: gh.openWorkflowPR,
+  renderWorkflow: gh.renderWorkflow,
+}));
 
 const { GET: listRepos } = await import('./repos/route');
 const { GET: listPulls } = await import('./repos/[repoId]/pulls/route');
@@ -270,6 +292,35 @@ describe('GET /api/repos/:repoId/pulls/:number', () => {
     db.pullRequest.findUnique.mockResolvedValue(null);
     const res = await getPull(req('/x'), ctx({ repoId: 'r1', number: '9' }));
     expect(res.status).toBe(404);
+  });
+
+  it('loads changed files live from GitHub with the installation token', async () => {
+    db.review.findMany.mockResolvedValue([]);
+    db.review.findFirst.mockResolvedValue(null);
+    db.installation.findUnique.mockResolvedValue({ id: 'inst1', githubInstallationId: 7 });
+    gh.getInstallationOctokit.mockResolvedValue(gh.octokit);
+    gh.fetchPullRequestFiles.mockResolvedValue([
+      { path: 'a.ts', status: 'modified', patch: '@@ -1,2 +1,2 @@\n-a\n+b\n+c\n ctx' },
+      { path: 'logo.png', status: 'added', patch: '' },
+    ]);
+    const res = await getPull(req('/x'), ctx({ repoId: 'r1', number: '42' }));
+    expect(res.status).toBe(200);
+    const body = GetPullResponse.parse(await res.json());
+    expect(gh.fetchPullRequestFiles).toHaveBeenCalledWith(gh.octokit, 'acme', 'web', 42);
+    expect(body.files).toEqual([
+      { path: 'a.ts', status: 'modified', additions: 2, deletions: 1, patch: expect.any(String) },
+      { path: 'logo.png', status: 'added', additions: 0, deletions: 0, patch: null },
+    ]);
+  });
+
+  it('a GitHub failure does not hide the review (files: [])', async () => {
+    db.review.findMany.mockResolvedValue([]);
+    db.review.findFirst.mockResolvedValue(null);
+    db.installation.findUnique.mockResolvedValue({ id: 'inst1', githubInstallationId: 7 });
+    gh.getInstallationOctokit.mockRejectedValue(new Error('bad credentials'));
+    const res = await getPull(req('/x'), ctx({ repoId: 'r1', number: '42' }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).files).toEqual([]);
   });
 
   it('returns header + latest review (stale derived) + history, parsing with the shared schema', async () => {
@@ -537,15 +588,28 @@ describe('settings', () => {
     expect(res.status).toBe(403);
   });
 
-  it('workflow PR is a 501 until @app/workflow-templates lands', async () => {
+  it('workflow PR renders the YAML and opens the PR with the installation octokit', async () => {
     memberships.get('u1')!.set('org1', 'admin');
     db.installation.findUnique.mockResolvedValue({ id: 'inst1', githubInstallationId: 7 });
+    gh.getInstallationOctokit.mockResolvedValue(gh.octokit);
+    gh.renderWorkflow.mockReturnValue('name: ai-review');
+    gh.openWorkflowPR.mockResolvedValue({ prNumber: 5, prUrl: 'https://github.com/acme/web/pull/5' });
     const res = await workflowPr(
       req('/x', { method: 'POST', body: JSON.stringify({ provider: 'claude_action' }) }),
       ctx({ repoId: 'r1' }),
     );
-    expect(res.status).toBe(501);
-    expect(await errCode(res)).toBe('not_implemented');
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ prNumber: 5, prUrl: 'https://github.com/acme/web/pull/5' });
+    expect(gh.getInstallationOctokit).toHaveBeenCalledWith(7);
+    expect(gh.renderWorkflow).toHaveBeenCalledWith('claude_action', {
+      publicUrl: process.env.PUBLIC_URL,
+    });
+    expect(gh.openWorkflowPR).toHaveBeenCalledWith(
+      gh.octokit,
+      'acme/web',
+      'claude_action',
+      'name: ai-review',
+    );
   });
 });
 

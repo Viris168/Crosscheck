@@ -25,7 +25,7 @@ vi.mock('@/server/auth', () => ({
 }));
 
 const oauth = vi.hoisted(() => ({ authorizeUrl: vi.fn(), exchangeCode: vi.fn() }));
-vi.mock('@/lib/stubs', () => ({ chatgptOAuth: oauth }));
+vi.mock('@app/providers', () => ({ chatgptOAuth: oauth }));
 
 const { GET: start } = await import('./start/route');
 const { GET: callback } = await import('./callback/route');
@@ -71,20 +71,21 @@ describe('GET /api/oauth/chatgpt/start', () => {
     oauth.authorizeUrl.mockReturnValue('https://auth.example/authorize?x=1');
     const res = await start(nreq('/api/oauth/chatgpt/start?returnTo=/repos/r1/setup'));
     expect(res.headers.get('location')).toBe('https://auth.example/authorize?x=1');
-    const args = oauth.authorizeUrl.mock.calls[0]![0];
-    expect(args.redirectUri).toBe('http://localhost:3000/api/oauth/chatgpt/callback');
+    const [state, redirectUri, opts] = oauth.authorizeUrl.mock.calls[0]!;
+    expect(redirectUri).toBe('http://localhost:3000/api/oauth/chatgpt/callback');
+    expect(opts.codeChallenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const cookie = res.headers.get('set-cookie')!;
     expect(cookie).toContain(`${CHATGPT_OAUTH_COOKIE}=`);
     expect(cookie.toLowerCase()).toContain('httponly');
     const pending = decodePending(cookie.split(';')[0]!.split('=')[1]);
     expect(pending).toMatchObject({
-      state: args.state,
+      state,
       orgId: 'org1',
       returnTo: '/repos/r1/setup',
     });
   });
 
-  it('stub not implemented → back to the page with ?error=not_implemented', async () => {
+  it('an HttpError from the OAuth helper → back to the page with ?error=<code>', async () => {
     oauth.authorizeUrl.mockImplementation(() => {
       throw new HttpError('not_implemented', 'x');
     });
@@ -143,11 +144,11 @@ describe('GET /api/oauth/chatgpt/callback', () => {
     expect(res.headers.get('location')).toBe(
       'http://localhost:3000/repos/r1/setup?connected=chatgpt',
     );
-    expect(oauth.exchangeCode).toHaveBeenCalledWith({
-      code: 'c0de',
-      codeVerifier: pending.verifier,
-      redirectUri: 'http://localhost:3000/api/oauth/chatgpt/callback',
-    });
+    expect(oauth.exchangeCode).toHaveBeenCalledWith(
+      'c0de',
+      'http://localhost:3000/api/oauth/chatgpt/callback',
+      { codeVerifier: pending.verifier },
+    );
     const arg = upsert.mock.calls[0]![0];
     expect(arg.where.orgId_userId_provider).toEqual({
       orgId: 'org1',

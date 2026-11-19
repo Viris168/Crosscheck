@@ -92,6 +92,9 @@ importers:
       '@app/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@app/workflow-templates':
+        specifier: workspace:*
+        version: link:../../packages/workflow-templates
       '@tanstack/react-query':
         specifier: ^5.90.0
         version: 5.108.0(@types/react@19.3.0)(react@19.3.1)
