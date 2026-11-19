@@ -1,6 +1,6 @@
 import 'server-only';
 import { prisma } from '@app/db';
-import { HttpError, type ApiErrorCode, type MemberRole } from '@app/shared';
+import { HttpError, type MemberRole } from '@app/shared';
 import { requireOrgMember } from '@/server/auth';
 import { getRepoPermission, permissionAtLeast, type RepoPermission } from '@/server/github';
 import { logger } from '@/server/logger';
@@ -15,16 +15,9 @@ const NO_LOGIN = 'Link your GitHub account';
 const NO_READ = 'No access to this repository on GitHub';
 const NO_WRITE = 'Requires write access to this repository on GitHub';
 
-/**
- * 502 `github_error`. `ApiErrorCode` has no `github_error` yet (see tasks/CONTRACT_REQUESTS.md), so
- * the code is cast; the status is passed explicitly.
- */
+/** 502 `github_error`: GitHub didn't answer the permission check, so deny (fail closed). */
 function githubError(): HttpError {
-  return new HttpError(
-    'github_error' as ApiErrorCode,
-    'Could not check your access on GitHub. Try again.',
-    502,
-  );
+  return new HttpError('github_error', 'Could not check your access on GitHub. Try again.');
 }
 
 const isOrgAdmin = (role: MemberRole) => ADMIN_ROLES.includes(role);

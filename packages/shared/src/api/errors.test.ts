@@ -10,6 +10,7 @@ describe('HttpError / errorResponse', () => {
       error: { code: 'forbidden', message: 'Not a member' },
     });
     expect(new HttpError('payload_too_large', 'big').status).toBe(413);
+    expect(new HttpError('github_error', 'GitHub down').status).toBe(502);
     expect(new HttpError('conflict', 'x', 418).status).toBe(418);
   });
 
