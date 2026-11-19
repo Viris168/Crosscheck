@@ -1,6 +1,6 @@
 'use client';
 
-import type { ChangedFileSchema, ReviewIssueWithId } from '@app/shared/client';
+import type { ChangedFileSchema, ReviewIssueWithId, Severity } from '@app/shared/client';
 import { FileCode2, Folder } from 'lucide-react';
 import { Fragment, useEffect, useMemo } from 'react';
 import type { z } from 'zod';
@@ -155,6 +155,36 @@ function Code({
   );
 }
 
+const SEVERITY_RANK: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+
+/** The most severe level among a line's findings; it sets the line's bar and note colour. */
+function worst(issues: ReviewIssueWithId[]): Severity {
+  return issues.reduce<Severity>(
+    (w, i) => (SEVERITY_RANK[i.severity] > SEVERITY_RANK[w] ? i.severity : w),
+    'low',
+  );
+}
+
+/** One finding under a diff line: glass severity + category, title, explanation, suggested fix. */
+function IssueNote({ issue }: { issue: ReviewIssueWithId }) {
+  return (
+    <li className="flex flex-col gap-2 px-5 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <SeverityBadge severity={issue.severity} glass />
+        <span className="glass-chip">{issue.category}</span>
+        <span className="diff-issue-title">{issue.title}</span>
+      </div>
+      <p className="diff-issue-text max-w-[80ch]">{issue.explanation}</p>
+      {issue.suggested_fix && (
+        <details className="diff-issue-fix">
+          <summary>Suggested fix</summary>
+          <pre>{issue.suggested_fix}</pre>
+        </details>
+      )}
+    </li>
+  );
+}
+
 function FileDiff({
   file,
   issues,
@@ -205,7 +235,9 @@ function FileDiff({
                         focusLine != null && l.newLine === focusLine && 'diff-row-focus',
                       )}
                     >
-                      <td className={cn('w-1 p-0', found ? 'diff-bar-issue' : BAR[l.kind])} />
+                      <td
+                        className={cn('w-1 p-0', found ? `diff-bar-${worst(found)}` : BAR[l.kind])}
+                      />
                       <td className="diff-line-no w-12 select-none pr-4 pl-3 text-right">
                         {l.newLine ?? l.oldLine ?? ''}
                       </td>
@@ -217,19 +249,16 @@ function FileDiff({
                     </tr>
                     {found && (
                       <tr>
-                        <td colSpan={3} className="diff-issue px-4 py-2 font-sans">
+                        <td
+                          colSpan={3}
+                          className={`diff-issue diff-issue-${worst(found)} font-sans`}
+                        >
                           <ul
-                            className="flex flex-col gap-1"
+                            className="flex flex-col divide-y divide-white/10"
                             aria-label={`Issues on line ${l.newLine}`}
                           >
                             {found.map((i) => (
-                              <li key={i.id} className="flex flex-col gap-0.5 text-sm">
-                                <span className="flex items-center gap-2">
-                                  <SeverityBadge severity={i.severity} />
-                                  <span className="font-medium">{i.title}</span>
-                                </span>
-                                <span className="diff-issue-text">{i.explanation}</span>
-                              </li>
+                              <IssueNote key={i.id} issue={i} />
                             ))}
                           </ul>
                         </td>
