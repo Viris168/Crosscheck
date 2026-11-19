@@ -14,6 +14,7 @@ function uniqueViolation(): Error {
 
 export function createFakeDb() {
   const t = {
+    user: [] as Row[],
     organization: [] as Row[],
     account: [] as Row[],
     member: [] as Row[],
@@ -25,7 +26,24 @@ export function createFakeDb() {
 
   const now = () => new Date();
 
+  const memberMatch = (where: any) => (m: Row) =>
+    (where.organizationId === undefined || m.organizationId === where.organizationId) &&
+    (where.userId === undefined || m.userId === where.userId) &&
+    (where.role === undefined || m.role === where.role);
+
+  /** Hook for tests: runs inside `$transaction` before the callback (e.g. to inject a failure). */
+  const hooks: { beforeTransaction?: () => void | Promise<void> } = {};
+
   const db = {
+    $transaction: async (fn: (tx: any) => Promise<unknown>) => {
+      await hooks.beforeTransaction?.();
+      return fn(db);
+    },
+    // Row locks (`SELECT … FOR UPDATE`) are a no-op in memory.
+    $queryRaw: async () => [],
+    user: {
+      findUnique: async ({ where }: any) => t.user.find((u) => u.id === where.id) ?? null,
+    },
     organization: {
       findFirst: async ({ where }: any) => {
         const want = String(where.githubAccountLogin.equals).toLowerCase();
@@ -33,6 +51,11 @@ export function createFakeDb() {
       },
       findUnique: async ({ where }: any) =>
         t.organization.find((o) => o.slug === where.slug) ?? null,
+      update: async ({ where, data }: any) => {
+        const hit = t.organization.find((o) => o.id === where.id);
+        if (!hit) throw new Error('not found');
+        return Object.assign(hit, data);
+      },
       create: async ({ data }: any) => {
         if (t.organization.some((o) => o.slug === data.slug)) throw uniqueViolation();
         const row = { createdAt: now(), plan: 'free', ...data };
@@ -43,12 +66,20 @@ export function createFakeDb() {
     account: {
       findFirst: async ({ where }: any) =>
         t.account.find(
-          (a) => a.providerId === where.providerId && a.accountId === where.accountId,
+          (a) =>
+            a.providerId === where.providerId &&
+            (where.accountId === undefined || a.accountId === where.accountId) &&
+            (where.userId === undefined || a.userId === where.userId),
         ) ?? null,
     },
     member: {
-      count: async ({ where }: any) =>
-        t.member.filter((m) => m.organizationId === where.organizationId).length,
+      count: async ({ where }: any) => t.member.filter(memberMatch(where)).length,
+      findMany: async ({ where }: any) => t.member.filter(memberMatch(where)),
+      deleteMany: async ({ where }: any) => {
+        const gone = t.member.filter(memberMatch(where));
+        t.member = t.member.filter((m) => !gone.includes(m));
+        return { count: gone.length };
+      },
       upsert: async ({ where, create }: any) => {
         const k = where.organizationId_userId;
         const hit = t.member.find(
@@ -66,14 +97,56 @@ export function createFakeDb() {
           (i) => i.githubInstallationId === where.githubInstallationId,
         );
         if (hit) return Object.assign(hit, update, { updatedAt: now() });
-        const row = { id: cuid('inst'), createdAt: now(), updatedAt: now(), ...create };
+        const row = {
+          id: cuid('inst'),
+          createdAt: now(),
+          updatedAt: now(),
+          needsMemberPermission: false,
+          ...create,
+        };
         t.installation.push(row);
         return row;
       },
+      update: async ({ where, data }: any) => {
+        const hit = t.installation.find((i) => i.id === where.id);
+        if (!hit) throw new Error('not found');
+        return Object.assign(hit, data, { updatedAt: now() });
+      },
+      /** Only the membership-sync query shape: OR of ids/orgIds, with an active repo. */
+      findMany: async ({ where }: any) => {
+        const ghIds: number[] = where.OR[0].githubInstallationId.in;
+        const orgIds: string[] = where.OR[1].orgId.in;
+        const activeRepos = (i: Row) =>
+          t.repo
+            .filter((r) => r.installationId === i.id && r.active)
+            .sort((a, b) => a.fullName.localeCompare(b.fullName));
+        return t.installation
+          .filter((i) => ghIds.includes(i.githubInstallationId) || orgIds.includes(i.orgId))
+          .filter((i) => activeRepos(i).length > 0)
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .map((i) => {
+            const org = t.organization.find((o) => o.id === i.orgId)!;
+            return {
+              id: i.id,
+              githubInstallationId: i.githubInstallationId,
+              orgId: i.orgId,
+              org: {
+                githubAccountLogin: org.githubAccountLogin ?? null,
+                githubAccountType: org.githubAccountType ?? null,
+              },
+              repos: activeRepos(i).map((r) => ({ fullName: r.fullName })),
+            };
+          });
+      },
     },
     repo: {
-      findUnique: async ({ where }: any) =>
-        t.repo.find((r) => r.githubRepoId === where.githubRepoId) ?? null,
+      findUnique: async ({ where, select }: any) => {
+        const hit = t.repo.find((r) => r.githubRepoId === where.githubRepoId);
+        if (!hit) return null;
+        if (!select?.org) return hit;
+        const org = t.organization.find((o) => o.id === hit.orgId);
+        return { ...hit, org: { githubAccountType: org?.githubAccountType ?? null } };
+      },
       upsert: async ({ where, create, update }: any) => {
         const hit = t.repo.find((r) => r.githubRepoId === where.githubRepoId);
         if (hit) return Object.assign(hit, update, { updatedAt: now() });
@@ -133,7 +206,7 @@ export function createFakeDb() {
     },
   };
 
-  return { db, tables: t };
+  return { db, tables: t, hooks };
 }
 
 export type FakeDb = ReturnType<typeof createFakeDb>;
