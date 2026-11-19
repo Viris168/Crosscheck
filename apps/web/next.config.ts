@@ -13,6 +13,9 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['@prisma/client', '.prisma/client', 'ioredis', 'pino'],
   outputFileTracingRoot: repoRoot,
   turbopack: { root: repoRoot },
+  // Dev only: let `next dev` serve its client/HMR resources through a Cloudflare quick tunnel
+  // (docs/deploy.md 1.4). Ignored by `next build` / production.
+  allowedDevOrigins: ['*.trycloudflare.com'],
 };
 
 export default nextConfig;
