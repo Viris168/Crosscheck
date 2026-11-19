@@ -258,7 +258,7 @@ throws `ProviderError(code)`. Defined in `packages/shared/provider.ts`.
 | Data minimization | No code/patch/prompt storage; no secrets in logs |
 | Transport | HTTPS only (Caddy, HSTS); internal services not exposed |
 | Server | SSH keys only, UFW 22/80/443, unattended upgrades, fail2ban, non-root containers |
-| GitHub App permissions | Pull requests R/W, Contents R, Checks R/W, Metadata R, Issues R |
+| GitHub App permissions | Pull requests R/W, Contents R/W (Merge button), Checks R/W, Metadata R, Issues R |
 
 ## 10. Deployment
 
