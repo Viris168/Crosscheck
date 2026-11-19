@@ -10,8 +10,10 @@ let cached: Promise<string | null> | undefined;
  * App isn't configured or GitHub can't be reached (the next call tries again).
  */
 export function getInstallUrl(): Promise<string | null> {
-  cached ??= getAppOctokit()
-    .rest.apps.getAuthenticated()
+  // Inside `.then` so a missing GITHUB_APP_ID / key (getAppOctokit throws synchronously) also
+  // resolves to null instead of crashing the page.
+  cached ??= Promise.resolve()
+    .then(() => getAppOctokit().rest.apps.getAuthenticated())
     .then(({ data }) => {
       if (!data?.slug) throw new Error('GitHub returned no app slug');
       return `https://github.com/apps/${encodeURIComponent(data.slug)}/installations/new`;

@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getAuthenticated = vi.hoisted(() => vi.fn());
-vi.mock('@app/github', () => ({
-  getAppOctokit: () => ({ rest: { apps: { getAuthenticated } } }),
-}));
+const getAppOctokit = vi.hoisted(() => vi.fn());
+vi.mock('@app/github', () => ({ getAppOctokit }));
 vi.mock('@/server/logger', () => ({ logger: { warn: vi.fn() } }));
 
 const { getInstallUrl, resetInstallUrlCache } = await import('./install-url');
@@ -11,6 +10,7 @@ const { getInstallUrl, resetInstallUrlCache } = await import('./install-url');
 beforeEach(() => {
   resetInstallUrlCache();
   getAuthenticated.mockReset();
+  getAppOctokit.mockReset().mockReturnValue({ rest: { apps: { getAuthenticated } } });
 });
 
 describe('getInstallUrl', () => {
@@ -32,6 +32,13 @@ describe('getInstallUrl', () => {
 
   it('returns null when GitHub sends no slug', async () => {
     getAuthenticated.mockResolvedValue({ data: null });
+    expect(await getInstallUrl()).toBeNull();
+  });
+
+  it('returns null when the App credentials are not configured', async () => {
+    getAppOctokit.mockImplementationOnce(() => {
+      throw new Error('GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be set');
+    });
     expect(await getInstallUrl()).toBeNull();
   });
 });
