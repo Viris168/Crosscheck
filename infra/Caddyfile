@@ -1,0 +1,41 @@
+# Caddy: automatic HTTPS (Let's Encrypt) for {$DOMAIN}; everything goes to the one Next.js app.
+# DOMAIN=localhost → Caddy's internal CA (local test; `curl -k` or trust the Caddy root).
+
+{
+	# Optional contact for Let's Encrypt expiry notices: set ACME_EMAIL and uncomment.
+	# email {$ACME_EMAIL}
+	# Caddy is the edge: it trusts no incoming X-Forwarded-* headers (the default) and sets its own.
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Content-Security-Policy "frame-ancestors 'none'"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+		-X-Powered-By
+	}
+
+	# Action results: 2 MB max (the app itself caps the payload at 1 MB → 413).
+	@ingest path /api/ingest /api/ingest/*
+	request_body @ingest {
+		max_size 2MB
+	}
+
+	# The Inngest server calls the app directly on the internal network (http://web:3000/api/inngest).
+	# Nobody on the internet needs this endpoint, so don't expose it.
+	@inngest path /api/inngest /api/inngest/*
+	respond @inngest 404
+
+	reverse_proxy web:3000
+
+	log {
+		output stdout
+		format json
+	}
+}
