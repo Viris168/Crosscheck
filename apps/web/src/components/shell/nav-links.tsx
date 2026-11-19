@@ -4,14 +4,18 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
+const isMembers = (p: string) => p === '/settings/members' || p.startsWith('/settings/members/');
+
 const LINKS = [
   { href: '/', label: 'Overview', match: (p: string) => p === '/' },
   { href: '/repos', label: 'Repositories', match: (p: string) => p.startsWith('/repos') },
   {
     href: '/settings/connections',
     label: 'Connections',
-    match: (p: string) => p.startsWith('/settings'),
+    // Every other settings page (incl. a bare /settings) keeps highlighting Connections.
+    match: (p: string) => p.startsWith('/settings') && !isMembers(p),
   },
+  { href: '/settings/members', label: 'Members', match: isMembers },
 ];
 
 export function NavLinks() {
