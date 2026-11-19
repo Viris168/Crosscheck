@@ -135,8 +135,10 @@ GitHub → Settings → Developer settings → GitHub Apps → New (or under you
 - **Homepage URL:** `https://DOMAIN`
 - **Callback URL** (Better Auth login): `https://DOMAIN/api/auth/callback/github`
 - **Webhook URL:** `https://DOMAIN/api/webhooks/github` · **Webhook secret:** `openssl rand -hex 32`
-- **Repository permissions:** Pull requests **Read & write**, Contents **Read**, Checks **Read & write**,
-  Metadata **Read**, Issues **Read** (for comments)
+- **Repository permissions:** Pull requests **Read & write**, Contents **Read & write** (write is only
+  for the dashboard's Merge button), Checks **Read & write**, Metadata **Read**, Issues **Read** (for comments)
+- Raising a permission on an existing App: GitHub asks each installation's owner to accept it
+  (org/user Settings → GitHub Apps → Configure → *Review request*). Until they do, Merge returns 403.
 - **Subscribe to events:** Pull request, Issue comment, Installation (always on), Installation repositories
 - Generate a **private key** (.pem) and a **client secret**. Note App ID + Client ID.
 

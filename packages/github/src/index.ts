@@ -19,3 +19,4 @@ export {
   type PrMeta,
 } from './fetch';
 export { signWebhookBody, verifyWebhookSignature } from './signature';
+export { MergeError, mergePullRequest, type MergeFailureReason, type MergeMethod } from './merge';

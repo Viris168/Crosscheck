@@ -18,8 +18,13 @@ export async function requireRepoAccess(
   return repo;
 }
 
-export async function requirePullAccess(userId: string, repoId: string, number: number) {
-  const repo = await requireRepoAccess(userId, repoId);
+export async function requirePullAccess(
+  userId: string,
+  repoId: string,
+  number: number,
+  roles?: readonly MemberRole[],
+) {
+  const repo = await requireRepoAccess(userId, repoId, roles);
   const pull = await prisma.pullRequest.findUnique({
     where: { repoId_number: { repoId, number } },
   });

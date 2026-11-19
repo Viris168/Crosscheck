@@ -10,6 +10,8 @@ import {
   fetchPullRequest,
   fetchPullRequestFiles,
   getInstallationOctokit,
+  MergeError,
+  mergePullRequest,
   readAppCredentials,
   resetGithubClients,
   setInstallationAuthForTesting,
@@ -345,5 +347,47 @@ describe('fetchFileText', () => {
         code: 'github_error',
       },
     );
+  });
+});
+
+describe('mergePullRequest', () => {
+  const url = `${API}/repos/acme/web/pulls/7/merge`;
+
+  it('merges the pinned head with the chosen method', async () => {
+    let body: unknown;
+    server.use(
+      http.put(url, async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ sha: 'merged1', merged: true, message: 'Merged' });
+      }),
+    );
+    expect(
+      await mergePullRequest(octokit(), 'acme', 'web', 7, { sha: 'abc', method: 'squash' }),
+    ).toEqual({ sha: 'merged1' });
+    expect(body).toEqual({ sha: 'abc', merge_method: 'squash' });
+  });
+
+  it.each([
+    [405, 'not_mergeable', 'Required status check "ci" is expected.'],
+    [409, 'head_changed', 'Head branch was modified. Review and try the merge again.'],
+    [403, 'forbidden', 'Resource not accessible by integration'],
+    [404, 'not_found', 'Not Found'],
+  ] as const)("%i → MergeError(%s) with GitHub's message", async (status, reason, message) => {
+    server.use(http.put(url, () => HttpResponse.json({ message }, { status })));
+    const err = await mergePullRequest(octokit(), 'acme', 'web', 7, {
+      sha: 'abc',
+      method: 'merge',
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MergeError);
+    expect(err).toMatchObject({ reason, message });
+  });
+
+  it('rethrows other failures', async () => {
+    server.use(http.put(url, () => HttpResponse.json({ message: 'boom' }, { status: 500 })));
+    const err = await mergePullRequest(octokit(), 'acme', 'web', 7, {
+      sha: 'abc',
+      method: 'merge',
+    }).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(MergeError);
   });
 });
