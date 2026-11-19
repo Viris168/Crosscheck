@@ -4,6 +4,7 @@ import { isActionProvider, type RepoListItem } from '@app/shared/client';
 import { Settings2 } from 'lucide-react';
 import Link from 'next/link';
 import { ProviderBadge, StaleBadge, StatusChip } from '@/components/chips';
+import { InstallAppButton } from '@/components/install-app-button';
 import { QueryError } from '@/components/query-error';
 import { buttonVariants } from '@/components/ui/button';
 import { LoadingState } from '@/components/ui/skeleton';
@@ -14,14 +15,16 @@ export function needsSetup(repo: Pick<RepoListItem, 'provider' | 'hasIngestToken
   return isActionProvider(repo.provider) && !repo.hasIngestToken;
 }
 
-export function RepoList() {
+/** `installUrl`: GitHub's install page for our App (null when unknown). */
+export function RepoList({ installUrl = null }: { installUrl?: string | null }) {
   const { data, error, isPending } = useRepos();
   if (isPending) return <LoadingState label="Loading repositories…" />;
   if (error) return <QueryError error={error} what="organization" />;
   if (data.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+      <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
         No repositories yet. Install the GitHub App on your organization to add repositories.
+        <InstallAppButton href={installUrl} />
       </div>
     );
   }
