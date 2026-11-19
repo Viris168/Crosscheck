@@ -5,7 +5,7 @@ import {
   PutRepoSettingsResponse,
   RepoParams,
 } from '@app/shared';
-import { ADMIN_ROLES, requireRepoAccess } from '@/lib/server/access';
+import { canEditRepo, requireRepoAccess, requireRepoWrite } from '@/lib/server/access';
 import { json, readJson, route } from '@/lib/server/http';
 import { settingsOf } from '@/lib/server/serialize';
 import { requireSession } from '@/server/auth';
@@ -13,7 +13,7 @@ import { logger } from '@/server/logger';
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/repos/:repoId/settings — any member. */
+/** GET /api/repos/:repoId/settings — anyone who can view the repo; `canEdit` says if they can save. */
 export const GET = route<{ repoId: string }>(async (req, params) => {
   const session = await requireSession(req);
   const { repoId } = RepoParams.parse(params);
@@ -23,15 +23,16 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
     provider: repo.provider,
     settings: settingsOf(repo.settings),
     hasIngestToken: repo.ingestTokenHash != null,
+    canEdit: await canEditRepo(session.user.id, repo),
   });
 });
 
-/** PUT /api/repos/:repoId/settings — full replacement; owners and admins only. */
+/** PUT /api/repos/:repoId/settings — full replacement; org owner/admin or GitHub `write`+. */
 export const PUT = route<{ repoId: string }>(async (req, params) => {
   const { repoId } = RepoParams.parse(params);
   const body = PutRepoSettingsRequest.parse(await readJson(req));
   const session = await requireSession(req);
-  await requireRepoAccess(session.user.id, repoId, ADMIN_ROLES);
+  await requireRepoWrite(session.user.id, repoId);
 
   const repo = await prisma.repo.update({
     where: { id: repoId },
@@ -43,5 +44,6 @@ export const PUT = route<{ repoId: string }>(async (req, params) => {
     provider: repo.provider,
     settings: settingsOf(repo.settings),
     hasIngestToken: repo.ingestTokenHash != null,
+    canEdit: true,
   });
 });
