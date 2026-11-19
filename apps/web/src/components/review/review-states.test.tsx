@@ -187,6 +187,33 @@ describe('review states', () => {
     );
   });
 
+  it('completed: copies a Claude fix prompt for one finding or all of them', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const issue = {
+      id: 'i1',
+      posted: true,
+      file: 'src/a.ts',
+      line: 31,
+      severity: 'high' as const,
+      category: 'security' as const,
+      title: 'SQL injection',
+      explanation: 'Raw query.',
+    };
+    render(
+      <ReviewState
+        review={review({ status: 'completed', issues: [issue] })}
+        ctx={{ ...ctx, headRef: 'feat' }}
+        actions={actions()}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Copy for Claude' }));
+    expect(writeText.mock.calls[0]?.[0]).toContain('src/a.ts:31 · High · security');
+    expect(writeText.mock.calls[0]?.[0]).toContain('acme/web PR #42 (branch feat)');
+    await userEvent.click(screen.getByRole('button', { name: 'Copy all for Claude' }));
+    expect(writeText.mock.calls[1]?.[0]).toContain('Fix this finding');
+  });
+
   it('completed with too_large shows the partial-review notice', () => {
     render(
       <ReviewState

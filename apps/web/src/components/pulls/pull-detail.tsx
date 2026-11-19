@@ -59,7 +59,13 @@ function PullDetailView({ data, repoId }: { data: PullDetailData; repoId: string
 
   const focusFile = params.get('file');
   const focusLine = Number(params.get('line')) || undefined;
-  const ctx = { repoId, repoFullName: pull.repoFullName, prNumber: pull.number, prPath: pathname };
+  const ctx = {
+    repoId,
+    repoFullName: pull.repoFullName,
+    prNumber: pull.number,
+    prPath: pathname,
+    headRef: pull.headRef,
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -114,6 +120,7 @@ function PullDetailView({ data, repoId }: { data: PullDetailData; repoId: string
           files={files}
           issues={review?.issues ?? []}
           focus={focusFile ? { file: focusFile, line: focusLine } : null}
+          target={ctx}
         />
       ) : (
         <div className="grid gap-6 lg:grid-cols-[1fr_16rem]">
