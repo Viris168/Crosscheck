@@ -11,11 +11,14 @@ const SYNC_ORGS_LIMIT = 5;
 const SYNC_ORGS_WINDOW_SECONDS = 60;
 
 /**
- * Fixed 60s window per user. If Redis is unavailable we let the request through: the caller is
- * signed in, the sync is idempotent, and it never grants access on a GitHub error.
+ * Fixed 60s window per user. The window number is part of the key (like the ingest limiter), so a
+ * key whose EXPIRE failed is never reused and can't lock the user out. If Redis is unavailable we
+ * let the request through: the caller is signed in, the sync is idempotent, and it never grants
+ * access on a GitHub error.
  */
-async function allowSync(userId: string): Promise<boolean> {
-  const key = `rl:sync-orgs:${userId}`;
+async function allowSync(userId: string, now = Date.now()): Promise<boolean> {
+  const window = Math.floor(now / 1000 / SYNC_ORGS_WINDOW_SECONDS);
+  const key = `rl:sync-orgs:${userId}:${window}`;
   try {
     const redis = getRedis();
     const count = await redis.incr(key);
