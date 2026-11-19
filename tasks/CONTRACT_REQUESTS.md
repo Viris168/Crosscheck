@@ -95,3 +95,17 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Workaround in use:** `RepoWithLastReviewSchema = RepoSchema.extend({ lastReview })` in
   `apps/web/src/lib/pending-contracts.ts`, returned by `GET /api/repos`.
 - **Status:** applied (PR chore/contract-requests)
+
+### [Lane B] Carry the AI's own risk score from review-start / ingest to review-finalize
+- **Change:** add a nullable column to `Review` in `packages/db/prisma/schema.prisma` (+ migration):
+  ```prisma
+  /// The provider's own risk_score (max over chunks, or the Action's result). Input to computeRisk.
+  aiRiskScore Int?
+  ```
+- **Why:** `review-finalize` runs as a separate function and needs `aiScores` for `computeRisk`, but
+  step outputs / events may carry ids only. There is no field for the AI score before scoring.
+- **Workaround in use:** review-start writes the AI score (max over chunks) to `Review.riskScore`;
+  review-finalize reads it as `aiScores: [riskScore]` and then overwrites it with the computed score.
+  **Lane D:** until this lands, ingest should also save `result.risk_score` into `riskScore` (and
+  `result.summary` into `summary`) before sending `review/finalize`.
+- **Status:** open

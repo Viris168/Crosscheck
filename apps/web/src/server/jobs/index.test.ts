@@ -6,8 +6,25 @@ describe('@/server/jobs', () => {
     expect(inngest.id).toBe('ai-review');
   });
 
-  it('has no functions yet', () => {
-    expect(functions).toEqual([]);
+  it('registers review-start, review-finalize and review-sweep', () => {
+    const ids = functions.map((f) => f.id());
+    expect(ids).toEqual(['review-start', 'review-finalize', 'review-sweep']);
+  });
+
+  it('configures triggers, per-org concurrency and retries', () => {
+    const configs = functions.map(
+      (f) =>
+        f['getConfig']({
+          baseUrl: new URL('http://localhost/api/inngest'),
+          appPrefix: 'ai-review',
+        })[0],
+    );
+    const [start, finalize, sweep] = configs;
+    expect(start?.triggers).toEqual([{ event: 'review/requested' }]);
+    expect(start?.concurrency).toEqual({ key: 'event.data.orgId', limit: 3 });
+    expect(finalize?.triggers).toEqual([{ event: 'review/finalize' }]);
+    expect(sweep?.triggers).toEqual([{ cron: '*/5 * * * *' }]);
+    expect(start?.steps?.step?.retries).toEqual({ attempts: 2 }); // = retries (2 retries after the first try);
   });
 });
 
