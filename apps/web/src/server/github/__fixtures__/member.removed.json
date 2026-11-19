@@ -1,0 +1,7 @@
+{
+  "action": "removed",
+  "member": { "login": "bob", "id": 7002, "type": "User" },
+  "repository": { "id": 2001, "name": "web", "full_name": "Acme/web", "private": true },
+  "installation": { "id": 1001 },
+  "sender": { "login": "alice", "id": 7001, "type": "User" }
+}

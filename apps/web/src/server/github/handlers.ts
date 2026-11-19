@@ -13,9 +13,13 @@ import {
   InstallationPayload,
   InstallationRepositoriesPayload,
   IssueCommentPayload,
+  MemberPayload,
+  OrganizationPayload,
   PullRequestPayload,
   type PullRequestData,
 } from './payloads';
+import { syncUserMemberships } from './membership';
+import { invalidateRepoPermission } from './permissions';
 import { requestReview } from './reviews';
 
 /** What a handler did — logged and returned in the webhook response (no sensitive data). */
@@ -32,6 +36,12 @@ const ignored = (note: string): HandlerResult => ({ handled: false, note });
 interface GithubAccount {
   id: number;
   login: string;
+  /** `installation.account.type`: 'Organization' | 'User' (anything else is not stored). */
+  type?: string;
+}
+
+function accountType(account: GithubAccount): 'Organization' | 'User' | undefined {
+  return account.type === 'Organization' || account.type === 'User' ? account.type : undefined;
 }
 
 function slugify(login: string): string {
@@ -46,7 +56,8 @@ function slugify(login: string): string {
 /**
  * Finds the Better Auth Organization for a GitHub account (by `githubAccountLogin`, case-insensitive)
  * or creates it. The installing user (matched via `Account.accountId` = GitHub user id) becomes
- * `owner` when the org is new or has no members yet.
+ * `owner` when the org is new or has no members yet. Stores `githubAccountType` from
+ * `account.type` (also on existing orgs).
  */
 export async function ensureOrganization(
   account: GithubAccount,
@@ -54,8 +65,13 @@ export async function ensureOrganization(
 ): Promise<string> {
   let org = await prisma.organization.findFirst({
     where: { githubAccountLogin: { equals: account.login, mode: 'insensitive' } },
-    select: { id: true },
+    select: { id: true, githubAccountType: true },
   });
+  const type = accountType(account);
+
+  if (org && type && org.githubAccountType !== type) {
+    await prisma.organization.update({ where: { id: org.id }, data: { githubAccountType: type } });
+  }
 
   if (!org) {
     const base = slugify(account.login);
@@ -69,8 +85,9 @@ export async function ensureOrganization(
         name: account.login,
         slug: taken ? `${base}-gh${account.id}` : base,
         githubAccountLogin: account.login,
+        githubAccountType: type ?? null,
       },
-      select: { id: true },
+      select: { id: true, githubAccountType: true },
     });
     logger.info({ orgId: org.id }, 'organization created from GitHub installation');
   }
@@ -92,11 +109,16 @@ export async function ensureOrganization(
   return org.id;
 }
 
-async function upsertInstallation(githubInstallationId: number, orgId: string) {
+async function upsertInstallation(
+  githubInstallationId: number,
+  orgId: string,
+  opts: { clearNeedsMemberPermission?: boolean } = {},
+) {
+  const clear = opts.clearNeedsMemberPermission ? { needsMemberPermission: false } : {};
   return prisma.installation.upsert({
     where: { githubInstallationId },
     create: { githubInstallationId, orgId },
-    update: { orgId },
+    update: { orgId, ...clear },
     select: { id: true, orgId: true },
   });
 }
@@ -145,7 +167,10 @@ export async function handleInstallation(body: unknown): Promise<HandlerResult> 
     case 'new_permissions_accepted':
     case 'unsuspend': {
       const orgId = await ensureOrganization(p.installation.account, p.sender);
-      const inst = await upsertInstallation(ghId, orgId);
+      // Accepting the new permissions grants Organization → Members: read.
+      const inst = await upsertInstallation(ghId, orgId, {
+        clearNeedsMemberPermission: p.action === 'new_permissions_accepted',
+      });
       await upsertRepos(inst, p.repositories ?? []);
       return { handled: true, note: `installation ${p.action}` };
     }
@@ -176,6 +201,64 @@ export async function handleInstallationRepositories(body: unknown): Promise<Han
   return {
     handled: true,
     note: `+${p.repositories_added.length} -${p.repositories_removed.length} repos`,
+  };
+}
+
+// ---------------------------------------------------------------- members (task H, Part 4)
+
+/** Our user id for a GitHub user id, or null if they never signed in. Never matched by login. */
+async function findUserIdByGithubId(githubUserId: number): Promise<string | null> {
+  const account = await prisma.account.findFirst({
+    where: { providerId: 'github', accountId: String(githubUserId) },
+    select: { userId: true },
+  });
+  return account?.userId ?? null;
+}
+
+/** `organization.member_removed`: the user leaves our org right away. */
+export async function handleOrganization(body: unknown): Promise<HandlerResult> {
+  const p = OrganizationPayload.parse(body);
+  // member_added: nothing to do, they join at their next sign-in.
+  if (p.action !== 'member_removed') return ignored(`organization.${p.action}`);
+
+  const ghUser = p.membership?.user;
+  if (!ghUser) return ignored('no membership user');
+  const userId = await findUserIdByGithubId(ghUser.id);
+  if (!userId) return ignored('unknown user');
+
+  const org = await prisma.organization.findFirst({
+    where: { githubAccountLogin: { equals: p.organization.login, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  if (!org) return ignored('unknown organization');
+
+  const { count } = await prisma.member.deleteMany({ where: { organizationId: org.id, userId } });
+  logger.info({ userId, orgId: org.id, removed: count }, 'member removed on GitHub');
+  return { handled: true, note: count > 0 ? 'member removed' : 'not a member' };
+}
+
+/** `member.removed` / `member.edited`: a repo collaborator's access changed. */
+export async function handleMember(body: unknown): Promise<HandlerResult> {
+  const p = MemberPayload.parse(body);
+  if (p.action !== 'removed' && p.action !== 'edited') return ignored(`member.${p.action}`);
+
+  const userId = await findUserIdByGithubId(p.member.id);
+  if (!userId) return ignored('unknown user');
+
+  await invalidateRepoPermission(p.repository.id, p.member.login);
+
+  // Personal installs have no GitHub org: membership follows repo collaborators.
+  const repo = await prisma.repo.findUnique({
+    where: { githubRepoId: p.repository.id },
+    select: { orgId: true, org: { select: { githubAccountType: true } } },
+  });
+  if (repo?.org.githubAccountType !== 'User') {
+    return { handled: true, note: 'permission cache invalidated' };
+  }
+  const { joined, left } = await syncUserMemberships(userId);
+  return {
+    handled: true,
+    note: `permission cache invalidated; sync +${joined.length} -${left.length}`,
   };
 }
 

@@ -14,3 +14,4 @@ export {
   type GetRepoPermissionInput,
   type RepoPermission,
 } from './permissions';
+export { syncUserMemberships, type SyncResult } from './membership';
