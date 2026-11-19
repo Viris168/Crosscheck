@@ -170,4 +170,4 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Why:** H-spec Part 5.1 says a GitHub error on a single-repo access check returns 502 `github_error`.
 - **Workaround in use:** `apps/web/src/lib/server/access.ts` throws
   `new HttpError('github_error' as ApiErrorCode, …, 502)`; drop the cast once this lands.
-- **Status:** requested (PR feat/h3-repo-access)
+- **Status:** applied (PR fix/shared-github-error-code; cast removed from `access.ts`)

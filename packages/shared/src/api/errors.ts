@@ -11,6 +11,8 @@ export const ApiErrorCode = [
   'rate_limited',
   'not_implemented',
   'internal',
+  /** GitHub failed while we needed its answer (e.g. a permission check). Fail closed. */
+  'github_error',
 ] as const;
 export type ApiErrorCode = (typeof ApiErrorCode)[number];
 
@@ -24,6 +26,7 @@ export const API_ERROR_STATUS: Record<ApiErrorCode, number> = {
   rate_limited: 429,
   not_implemented: 501,
   internal: 500,
+  github_error: 502,
 };
 
 /** Every non-2xx response. */
