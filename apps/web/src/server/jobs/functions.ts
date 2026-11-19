@@ -1,7 +1,10 @@
 // Inngest function definitions. Handlers live in review-*.ts and take their dependencies explicitly.
 import { LIMITS, REVIEW_SWEEP_CRON } from '@app/shared';
+import { syncUserMemberships } from '@/server/github';
+import { logger } from '@/server/logger';
 import { inngest } from './client';
 import { realDeps, type JobDeps, type StepTools } from './deps';
+import { memberSyncHandler } from './member-sync';
 import { reviewFinalizeHandler } from './review-finalize';
 import { reviewStartHandler } from './review-start';
 import { reviewSweepHandler } from './review-sweep';
@@ -44,4 +47,16 @@ export const reviewSweep = inngest.createFunction(
   { id: 'review-sweep', retries: 2 },
   { cron: REVIEW_SWEEP_CRON },
   ({ step }) => reviewSweepHandler({ step: tools(step) }, getDeps()),
+);
+
+/**
+ * Syncs a user's org memberships with GitHub after sign-in. One sync per user at a time;
+ * default retries (the sync is idempotent).
+ * VERIFY: with no `retries` set, inngest v3 retries a failed step 3 times (4 attempts).
+ */
+export const memberSync = inngest.createFunction(
+  { id: 'member-sync', concurrency: { key: 'event.data.userId', limit: 1 } },
+  { event: 'user/signed-in' },
+  ({ event, step }) =>
+    memberSyncHandler({ event, step: tools(step) }, { sync: syncUserMemberships, log: logger }),
 );
