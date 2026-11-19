@@ -1,0 +1,157 @@
+# Production stack (one VPS): caddy, web, inngest, postgres, redis, migrate.
+#
+# Run it through the wrapper, which passes the env file for both `${VAR}` interpolation and
+# the app's env_file, and remembers the deployed image tag:
+#   infra/scripts/compose.sh up -d             # on the server (env: /opt/app/.env)
+#   APP_ENV_FILE=/path/to/.env infra/scripts/compose.sh up -d --build   # locally
+# Plain compose works too:
+#   docker compose --env-file /opt/app/.env -f infra/compose.prod.yml up -d
+#
+# Networks: only caddy publishes ports (80/443). Everything else sits on the internal `backend`
+# network (no ports, no internet). `web` also joins `edge` so Caddy can reach it and it can call
+# GitHub / AI providers. Inngest's dashboard is bound to the host's loopback only (SSH tunnel).
+
+name: ai-review
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
+
+x-web-image: &web-image
+  image: ${WEB_IMAGE:-ai-review-web}:${WEB_TAG:-local}
+  env_file:
+    - path: ${APP_ENV_FILE:-../.env}
+      required: true
+  environment: &web-env
+    NODE_ENV: production
+    # Service addresses are fixed by this file; they override whatever the env file says.
+    DATABASE_URL: postgresql://app:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the env file}@postgres:5432/app
+    REDIS_URL: redis://redis:6379
+    INNGEST_BASE_URL: http://inngest:8288
+    INNGEST_DEV: '0'
+  logging: *logging
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '${HTTP_PORT:-80}:80'
+      - '${HTTPS_PORT:-443}:443'
+      - '${HTTPS_PORT:-443}:443/udp' # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in the env file (use localhost for a local test)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    depends_on:
+      web:
+        condition: service_started
+    logging: *logging
+
+  web:
+    <<: *web-image
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+    restart: unless-stopped
+    init: true
+    expose: ['3000']
+    networks: [edge, backend]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # healthcheck: defined in the image (GET /api/health)
+
+  migrate:
+    <<: *web-image
+    # One-shot: apply Prisma migrations, then exit 0. `web` waits for it.
+    command:
+      - /opt/prisma/node_modules/.bin/prisma
+      - migrate
+      - deploy
+      - --schema
+      - /app/prisma/schema.prisma
+    restart: 'no'
+    healthcheck:
+      disable: true
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  inngest:
+    image: inngest/inngest:v1.53.0
+    # VERIFY: flags/env names against Inngest's self-hosting docs (checked with `inngest start --help`, v1.53.0).
+    # Keys and URIs are passed as INNGEST_* env vars (not flags) so they don't show up in `ps`.
+    command: ['inngest', 'start', '--sdk-url', 'http://web:3000/api/inngest']
+    restart: unless-stopped
+    environment:
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:?set INNGEST_EVENT_KEY}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:?set INNGEST_SIGNING_KEY}
+      INNGEST_POSTGRES_URI: postgres://app:${POSTGRES_PASSWORD}@postgres:5432/inngest?sslmode=disable
+      INNGEST_REDIS_URI: redis://redis:6379
+    expose: ['8288']
+    ports:
+      # Dashboard + API on the host's loopback only → `ssh -L 8288:127.0.0.1:8288 deploy@VPS`.
+      - '127.0.0.1:${INNGEST_DASHBOARD_PORT:-8288}:8288'
+    networks: [backend, ops]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *logging
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: app
+    shm_size: 256mb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks: [backend]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app -d app']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *logging
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--appendfsync', 'everysec']
+    volumes:
+      - redisdata:/data
+    networks: [backend]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *logging
+
+networks:
+  edge: {}
+  backend:
+    internal: true
+  ops: {}
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

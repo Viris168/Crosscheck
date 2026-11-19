@@ -1,0 +1,155 @@
+name: Deploy
+
+# Manual only (Actions → Deploy → Run workflow). The project is a free local demo with no VPS
+# (tasks/G-infra.md "Scope now"), so nothing deploys on push. Without the VPS_HOST secret the run is a
+# green no-op that explains what to set up (docs/deploy.md "Later: deploy to a VPS").
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing image tag to deploy (e.g. sha-abc123…). Empty = build the selected ref.'
+        required: false
+      platforms:
+        description: 'Image platforms (linux/arm64 = Oracle Cloud Always Free Ampere VMs)'
+        required: false
+        default: 'linux/amd64,linux/arm64'
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Secrets can't be read in a job-level `if`, so this job turns "is a VPS configured?" into an output.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          if [ -n "$VPS_HOST" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            msg="No VPS configured (secret VPS_HOST is not set): skipping build + deploy. This project runs as a local demo; see docs/deploy.md → 'Later: deploy to a VPS'."
+            echo "::notice title=Deploy skipped::$msg"
+            echo "### Deploy skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  build:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: meta
+        name: Image name + tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}-web"
+          if [ -n "$INPUT_TAG" ]; then tag="$INPUT_TAG"; else tag="sha-$(git rev-parse HEAD)"; fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # arm64 is built under QEMU emulation (slower, still free on GitHub-hosted runners).
+      - uses: docker/setup-qemu-action@v3
+        if: inputs.tag == ''
+
+      - uses: docker/setup-buildx-action@v3
+        if: inputs.tag == ''
+
+      - name: Build + push
+        if: inputs.tag == ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          push: true
+          platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.image }}:main
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  deploy:
+    needs: [preflight, build]
+    if: needs.preflight.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      IMAGE: ${{ needs.build.outputs.image }}
+      TAG: ${{ needs.build.outputs.tag }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      APP_DIR: /opt/app
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: SSH setup
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }} # optional: pin the host key (ssh-keyscan output)
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$VPS_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -T 15 -H "$VPS_HOST" > ~/.ssh/known_hosts
+          fi
+          printf 'Host vps\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_deploy\n  IdentitiesOnly yes\n  ServerAliveInterval 30\n' \
+            "$VPS_HOST" "$VPS_USER" > ~/.ssh/config
+
+      - name: Upload infra/ (compose file, Caddyfile, scripts)
+        run: |
+          # shellcheck disable=SC2029  # values are meant to expand on the runner, not the VPS
+          ssh vps "mkdir -p $APP_DIR/infra"
+          rsync -az --delete --exclude '.deploy' infra/ "vps:$APP_DIR/infra/"
+
+      - name: Deploy (auto-rollback on failed healthcheck)
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          # shellcheck disable=SC2029  # values are meant to expand on the runner, not the VPS
+          # Short-lived registry login for the pull; logged out again whatever happens.
+          printf '%s' "$GHCR_TOKEN" | ssh vps "docker login ghcr.io -u '$GHCR_USER' --password-stdin" >/dev/null
+          status=0
+          # shellcheck disable=SC2029
+          ssh vps "WEB_IMAGE='$IMAGE' $APP_DIR/infra/scripts/deploy.sh '$TAG'" || status=$?
+          ssh vps "docker logout ghcr.io" >/dev/null || true
+          exit $status
+
+      - name: Summary
+        if: always()
+        run: echo "Deployed \`$IMAGE:$TAG\` → $VPS_HOST (${{ job.status }})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/id_deploy

@@ -109,3 +109,21 @@ local workaround. The owner applies approved changes on `main`; then rebase.
   **Lane D:** until this lands, ingest should also save `result.risk_score` into `riskScore` (and
   `result.summary` into `summary`) before sending `review/finalize`.
 - **Status:** applied (PR #9 adds `Review.aiRiskScore`; jobs + ingest use it since fix/wave2-wiring)
+
+### [Lane G] Next.js `output: 'standalone'` for the production image
+- **Change:** in `apps/web/next.config.ts` add `output: 'standalone'` (keep `outputFileTracingRoot: repoRoot`,
+  which makes the traced output contain `apps/web/server.js` + only the needed `node_modules`).
+  If Prisma's query engine is missing from the trace at runtime, also add
+  `outputFileTracingIncludes: { '/**': ['../../node_modules/.pnpm/@prisma+client*/node_modules/.prisma/client/**'] }`.
+- **Why:** `tasks/G-infra.md` asks for a standalone, slim web image. Without it the image has to ship the
+  whole pruned workspace (all `node_modules`, incl. dev deps) and run `next start`.
+- **Workaround in use:** `infra/docker/web.Dockerfile` detects `.next/standalone/apps/web/server.js`; when it
+  is missing it falls back to `next start` from the pruned workspace. Nothing else changes when this lands.
+- **Status:** open
+
+### [Lane G] Point `.env.example` at the production template
+- **Change:** one comment line in `.env.example`:
+  `# Production: see infra/env.prod.example (adds DOMAIN, POSTGRES_PASSWORD) and docs/deploy.md`.
+- **Why:** prod needs two infra-only vars that aren't in `.env.example`; avoids people hunting for them.
+- **Workaround in use:** `infra/env.prod.example` + `docs/deploy.md` §5.
+- **Status:** open
