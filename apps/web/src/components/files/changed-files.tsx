@@ -6,7 +6,9 @@ import { Fragment, useEffect, useMemo } from 'react';
 import type { z } from 'zod';
 import { DiffStat, SeverityBadge } from '@/components/chips';
 import { Card } from '@/components/ui/card';
+import { CopyButton } from '@/components/ui/copy-button';
 import { changedRanges, fileAnchor, lineAnchor, parsePatch, type DiffLine } from '@/lib/diff';
+import { issueFixPrompt, type FixTarget } from '@/lib/fix-prompt';
 import { highlightLine, languageFor, markRange } from '@/lib/highlight';
 import { cn } from '@/lib/utils';
 
@@ -17,10 +19,13 @@ export function ChangedFiles({
   files,
   issues,
   focus,
+  target,
 }: {
   files: ChangedFile[];
   issues: ReviewIssueWithId[];
   focus?: { file: string; line?: number } | null;
+  /** The PR, for "Copy for Claude" prompts on findings; no button without it. */
+  target?: FixTarget;
 }) {
   const issuesByFile = useMemo(() => {
     const m = new Map<string, Map<number, ReviewIssueWithId[]>>();
@@ -59,6 +64,7 @@ export function ChangedFiles({
             file={f}
             issues={issuesByFile.get(f.path)}
             focusLine={focus?.file === f.path ? focus.line : undefined}
+            target={target}
           />
         ))}
       </div>
@@ -166,13 +172,21 @@ function worst(issues: ReviewIssueWithId[]): Severity {
 }
 
 /** One finding under a diff line: glass severity + category, title, explanation, suggested fix. */
-function IssueNote({ issue }: { issue: ReviewIssueWithId }) {
+function IssueNote({ issue, target }: { issue: ReviewIssueWithId; target?: FixTarget }) {
   return (
     <li className="flex flex-col gap-2 px-5 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <SeverityBadge severity={issue.severity} glass />
         <span className="glass-chip">{issue.category}</span>
         <span className="diff-issue-title">{issue.title}</span>
+        {target && (
+          <CopyButton
+            value={issueFixPrompt(target, issue)}
+            label="Copy for Claude"
+            title={`Copy a prompt to fix "${issue.title}" in Claude Code`}
+            className="glass-button ml-auto"
+          />
+        )}
       </div>
       <p className="diff-issue-text max-w-[80ch]">{issue.explanation}</p>
       {issue.suggested_fix && (
@@ -189,10 +203,12 @@ function FileDiff({
   file,
   issues,
   focusLine,
+  target,
 }: {
   file: ChangedFile;
   issues?: Map<number, ReviewIssueWithId[]>;
   focusLine?: number;
+  target?: FixTarget;
 }) {
   const lines = useMemo(() => (file.patch ? parsePatch(file.patch) : []), [file.patch]);
   const ranges = useMemo(() => changedRanges(lines), [lines]);
@@ -258,7 +274,7 @@ function FileDiff({
                             aria-label={`Issues on line ${l.newLine}`}
                           >
                             {found.map((i) => (
-                              <IssueNote key={i.id} issue={i} />
+                              <IssueNote key={i.id} issue={i} target={target} />
                             ))}
                           </ul>
                         </td>

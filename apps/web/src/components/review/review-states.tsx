@@ -13,9 +13,11 @@ import { ProviderBadge, RiskBadge, SeverityBadge } from '@/components/chips';
 import { Alert } from '@/components/ui/alert';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { CopyButton } from '@/components/ui/copy-button';
 import { Label, Select } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { filesTabHref } from '@/lib/diff';
+import { issueFixPrompt, reviewFixPrompt } from '@/lib/fix-prompt';
 import { formatDuration, PROVIDER_LABEL, shortSha } from '@/lib/labels';
 import { useNow } from '@/lib/use-now';
 import { failureMessage } from './failure-message';
@@ -26,6 +28,8 @@ export interface ReviewContext {
   prNumber: number;
   /** Base path of the PR page, used for "jump to line" links. */
   prPath: string;
+  /** The PR's branch, named in "Copy for Claude" prompts. */
+  headRef?: string;
 }
 
 export interface ReviewActions {
@@ -210,9 +214,18 @@ export function ReviewCompleted({ review, ctx, actions }: StateProps & { actions
       </Card>
 
       <section aria-labelledby="issues-heading" className="flex flex-col gap-3">
-        <h3 id="issues-heading" className="text-sm font-semibold">
-          Issues ({review.issues.length})
-        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 id="issues-heading" className="text-sm font-semibold">
+            Issues ({review.issues.length})
+          </h3>
+          {review.issues.length > 0 && (
+            <CopyButton
+              value={reviewFixPrompt(ctx, review.issues)}
+              label="Copy all for Claude"
+              title="Copy a prompt with every finding, to paste into Claude Code"
+            />
+          )}
+        </div>
         {review.issues.length === 0 && (
           <p className="text-sm text-muted-foreground">No issues found.</p>
         )}
@@ -224,11 +237,11 @@ export function ReviewCompleted({ review, ctx, actions }: StateProps & { actions
             <CardContent>
               <ul className="flex flex-col divide-y">
                 {issues.map((issue) => (
-                  <li key={issue.id} className="py-2 first:pt-0 last:pb-0">
+                  <li key={issue.id} className="flex items-start gap-2 py-2 first:pt-0 last:pb-0">
                     <Link
                       href={filesTabHref(ctx.prPath, issue.file, issue.line, review.id)}
                       scroll={false}
-                      className="flex flex-col gap-1 rounded-md p-1 outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      className="flex min-w-0 flex-1 flex-col gap-1 rounded-md p-1 outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     >
                       <span className="flex flex-wrap items-center gap-2">
                         <SeverityBadge severity={issue.severity} />
@@ -240,6 +253,11 @@ export function ReviewCompleted({ review, ctx, actions }: StateProps & { actions
                       </span>
                       <span className="text-sm text-muted-foreground">{issue.explanation}</span>
                     </Link>
+                    <CopyButton
+                      value={issueFixPrompt(ctx, issue)}
+                      label="Copy for Claude"
+                      title={`Copy a prompt to fix "${issue.title}" in Claude Code`}
+                    />
                   </li>
                 ))}
               </ul>
