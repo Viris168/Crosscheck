@@ -4,6 +4,7 @@ import {
   GetPullResponse,
   GetRepoSettingsResponse,
   HttpError,
+  MergeResponse,
   ListPullsResponse,
   ListReposResponse,
   RerunResponse,
@@ -14,6 +15,7 @@ import {
   type MemberRole,
 } from '@app/shared';
 import type * as DbModule from '@app/db';
+import type * as GithubModule from '@app/github';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------- mocks
@@ -24,7 +26,7 @@ const db = vi.hoisted(() => {
   const fn = () => vi.fn();
   return {
     repo: { findUnique: fn(), findMany: fn(), update: fn(), count: fn() },
-    pullRequest: { findUnique: fn(), findMany: fn() },
+    pullRequest: { findUnique: fn(), findMany: fn(), update: fn() },
     review: {
       findUnique: fn(),
       findMany: fn(),
@@ -75,12 +77,15 @@ const gh = vi.hoisted(() => ({
   octokit: { tag: 'installation-octokit' },
   getInstallationOctokit: vi.fn(),
   fetchPullRequestFiles: vi.fn(),
+  mergePullRequest: vi.fn(),
   openWorkflowPR: vi.fn(),
   renderWorkflow: vi.fn(),
 }));
-vi.mock('@app/github', () => ({
+vi.mock('@app/github', async () => ({
+  MergeError: (await vi.importActual<typeof GithubModule>('@app/github')).MergeError,
   getInstallationOctokit: gh.getInstallationOctokit,
   fetchPullRequestFiles: gh.fetchPullRequestFiles,
+  mergePullRequest: gh.mergePullRequest,
   splitFullName: (n: string) => {
     const [owner, repo] = n.split('/');
     return { owner, repo };
@@ -95,6 +100,8 @@ const { GET: listRepos } = await import('./repos/route');
 const { GET: listPulls } = await import('./repos/[repoId]/pulls/route');
 const { GET: getPull } = await import('./repos/[repoId]/pulls/[number]/route');
 const { POST: rerun } = await import('./repos/[repoId]/pulls/[number]/rerun/route');
+const { POST: merge } = await import('./repos/[repoId]/pulls/[number]/merge/route');
+const { MergeError } = await import('@app/github');
 const { GET: getReview } = await import('./reviews/[id]/route');
 const { POST: retry } = await import('./reviews/[id]/retry/route');
 const { POST: cancel } = await import('./reviews/[id]/cancel/route');
@@ -192,6 +199,7 @@ describe('session and membership', () => {
     ['GET pulls', () => listPulls(req('/api/repos/r1/pulls'), ctx({ repoId: 'r1' }))],
     ['GET pull', () => getPull(req('/api/repos/r1/pulls/42'), ctx({ repoId: 'r1', number: '42' }))],
     ['POST rerun', () => rerun(req('/x', { method: 'POST' }), ctx({ repoId: 'r1', number: '42' }))],
+    ['POST merge', () => merge(req('/x', { method: 'POST' }), ctx({ repoId: 'r1', number: '42' }))],
     ['GET review', () => getReview(req('/x'), ctx({ id: 'rev1' }))],
     ['POST retry', () => retry(req('/x', { method: 'POST' }), ctx({ id: 'rev1' }))],
     ['POST cancel', () => cancel(req('/x', { method: 'POST' }), ctx({ id: 'rev1' }))],
@@ -522,6 +530,100 @@ describe('POST /api/repos/:repoId/pulls/:number/rerun', () => {
   });
 });
 
+describe('POST /api/repos/:repoId/pulls/:number/merge', () => {
+  const call = (body?: unknown) =>
+    merge(
+      req('/x', { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }),
+      ctx({ repoId: 'r1', number: '42' }),
+    );
+  const reviewed = { ...baseReview, headSha: 'head2' };
+
+  beforeEach(() => {
+    memberships.set('u1', new Map([['org1', 'admin']]));
+    db.review.findFirst.mockResolvedValue(reviewed);
+    db.installation.findUnique.mockResolvedValue({ id: 'inst1', githubInstallationId: 99 });
+    gh.getInstallationOctokit.mockResolvedValue(gh.octokit);
+    gh.mergePullRequest.mockResolvedValue({ sha: 'mergeSha' });
+  });
+
+  it('a plain member cannot merge (403)', async () => {
+    memberships.set('u1', new Map([['org1', 'member']]));
+    const res = await call();
+    expect(res.status).toBe(403);
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("cannot merge another org's PR (403)", async () => {
+    const res = await merge(req('/x', { method: 'POST' }), ctx({ repoId: 'r2', number: '42' }));
+    expect(res.status).toBe(403);
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('unknown method → 400', async () => {
+    expect((await call({ method: 'octopus' })).status).toBe(400);
+  });
+
+  it('merges the reviewed head with the installation token and marks the PR merged', async () => {
+    const res = await call({ method: 'squash' });
+    expect(res.status).toBe(200);
+    expect(MergeResponse.parse(await res.json())).toEqual({ merged: true, sha: 'mergeSha' });
+    expect(gh.getInstallationOctokit).toHaveBeenCalledWith(99);
+    expect(gh.mergePullRequest).toHaveBeenCalledWith(gh.octokit, 'acme', 'web', 42, {
+      sha: 'head2',
+      method: 'squash',
+    });
+    expect(db.pullRequest.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { state: 'merged' },
+    });
+  });
+
+  it('defaults to a merge commit', async () => {
+    await call();
+    expect(gh.mergePullRequest.mock.calls[0]?.[4]).toEqual({ sha: 'head2', method: 'merge' });
+  });
+
+  it.each([
+    ['no review', null],
+    ['a review of an older commit', { ...baseReview, headSha: 'head1' }],
+    ['a review still running', { ...reviewed, status: 'running' }],
+    ['a failed review', { ...reviewed, status: 'failed' }],
+  ])('409 with %s', async (_name, latest) => {
+    db.review.findFirst.mockResolvedValue(latest);
+    const res = await call();
+    expect(res.status).toBe(409);
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('409 when the PR is not open', async () => {
+    db.pullRequest.findUnique.mockResolvedValue({ ...pull, state: 'closed' });
+    expect((await call()).status).toBe(409);
+    expect(gh.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not_mergeable', 409, /Required status check/],
+    ['head_changed', 409, /branch changed/],
+    ['forbidden', 403, /Contents: Read & write/],
+    ['not_found', 404, /not found/],
+  ] as const)('GitHub %s → %i', async (reason, status, message) => {
+    gh.mergePullRequest.mockRejectedValue(
+      new MergeError(reason, 'Required status check "ci" is expected.'),
+    );
+    const res = await call();
+    expect(res.status).toBe(status);
+    expect(ApiErrorSchema.parse(await res.json()).error.message).toMatch(message);
+    expect(db.pullRequest.update).not.toHaveBeenCalled();
+  });
+
+  it('other GitHub failures → 500 without details', async () => {
+    gh.mergePullRequest.mockRejectedValue(new Error('socket hang up'));
+    const res = await call();
+    expect(res.status).toBe(500);
+    expect(await errCode(res)).toBe('internal');
+  });
+});
+
 // ---------------------------------------------------------------- settings + tokens
 
 describe('settings', () => {
@@ -593,7 +695,10 @@ describe('settings', () => {
     db.installation.findUnique.mockResolvedValue({ id: 'inst1', githubInstallationId: 7 });
     gh.getInstallationOctokit.mockResolvedValue(gh.octokit);
     gh.renderWorkflow.mockReturnValue('name: ai-review');
-    gh.openWorkflowPR.mockResolvedValue({ prNumber: 5, prUrl: 'https://github.com/acme/web/pull/5' });
+    gh.openWorkflowPR.mockResolvedValue({
+      prNumber: 5,
+      prUrl: 'https://github.com/acme/web/pull/5',
+    });
     const res = await workflowPr(
       req('/x', { method: 'POST', body: JSON.stringify({ provider: 'claude_action' }) }),
       ctx({ repoId: 'r1' }),

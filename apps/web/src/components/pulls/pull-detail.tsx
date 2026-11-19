@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { DiffStat, ProviderBadge, StaleBadge, StatusChip } from '@/components/chips';
 import { ChangedFiles } from '@/components/files/changed-files';
+import { MergeControl } from '@/components/pulls/merge-control';
 import { ReviewPanel } from '@/components/review/review-panel';
 import { QueryError } from '@/components/query-error';
 import { Alert } from '@/components/ui/alert';
@@ -88,6 +89,9 @@ function PullDetailView({ data, repoId }: { data: PullDetailData; repoId: string
           >
             Open on GitHub <ExternalLink aria-hidden />
           </a>
+          {pull.state === 'open' && (
+            <MergeControl repoId={repoId} number={pull.number} review={data.review} />
+          )}
         </div>
       </header>
 

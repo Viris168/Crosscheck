@@ -1,7 +1,12 @@
 'use client';
 
-import { GetPullResponse, ListPullsResponse } from '@app/shared/client';
-import { useQuery } from '@tanstack/react-query';
+import {
+  GetPullResponse,
+  ListPullsResponse,
+  MergeResponse,
+  type MergeMethod,
+} from '@app/shared/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import { isActiveStatus, POLL_MS } from '@/lib/review-status';
@@ -23,5 +28,18 @@ export function usePull(repoId: string, number: number) {
     queryFn: () =>
       apiFetch(`/api/repos/${encodeURIComponent(repoId)}/pulls/${number}`, GetPullResponse),
     refetchInterval: (q) => (isActiveStatus(q.state.data?.review?.status) ? POLL_MS : false),
+  });
+}
+
+/** Merges the PR on GitHub (owner/admin; needs a completed review of the current head). */
+export function useMergePull(repoId: string, number: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (method: MergeMethod) =>
+      apiFetch(`/api/repos/${encodeURIComponent(repoId)}/pulls/${number}/merge`, MergeResponse, {
+        method: 'POST',
+        body: JSON.stringify({ method }),
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['repos', repoId] }),
   });
 }
