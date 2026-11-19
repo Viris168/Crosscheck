@@ -1,5 +1,5 @@
 // Everything the review functions touch outside themselves. Handlers take a `JobDeps` so tests can
-// swap in fakes; `realDeps()` wires the merged packages (and the lane E mocks until it merges).
+// swap in fakes; `realDeps()` wires the real packages.
 import {
   fetchFileText,
   fetchPullRequestFiles,
@@ -8,9 +8,8 @@ import {
 } from '@app/github';
 import { getProvider } from '@app/providers';
 import type { ProviderId, ReviewFile, ReviewIssue, ReviewProvider, RiskResult } from '@app/shared';
-// TODO(lane E): switch these two imports to '@app/github-comments' and '@app/scoring', then delete ./mocks.
-import * as comments from './mocks/github-comments';
-import * as scoring from './mocks/scoring';
+import * as comments from '@app/github-comments';
+import * as scoring from '@app/scoring';
 import { logger } from '@/server/logger';
 import { prismaJobsStore, type JobsStore } from './store';
 

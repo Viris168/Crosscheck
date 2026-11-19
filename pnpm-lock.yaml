@@ -80,9 +80,15 @@ importers:
       '@app/github':
         specifier: workspace:*
         version: link:../../packages/github
+      '@app/github-comments':
+        specifier: workspace:*
+        version: link:../../packages/github-comments
       '@app/providers':
         specifier: workspace:*
         version: link:../../packages/providers
+      '@app/scoring':
+        specifier: workspace:*
+        version: link:../../packages/scoring
       '@app/shared':
         specifier: workspace:*
         version: link:../../packages/shared

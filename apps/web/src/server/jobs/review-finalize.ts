@@ -81,9 +81,8 @@ export async function reviewFinalizeHandler(
         const keptIds = new Set(kept.map((i) => i.id));
         const dropped = issues.filter((i) => !keptIds.has(i.id)).map((i) => i.id);
         await deps.store.deleteIssues(reviewId, dropped);
-        // Before finalize, review.riskScore holds the AI's own score (see store.ts / PR notes).
         const risk = deps.computeRisk({
-          aiScores: c.review.riskScore === null ? [] : [c.review.riskScore],
+          aiScores: c.review.aiRiskScore === null ? [] : [c.review.aiRiskScore],
           issues: kept.map(toIssue),
           pr: {
             additions: c.pr.additions,

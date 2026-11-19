@@ -18,6 +18,7 @@ export interface FakeReview {
   errorMessage: string | null;
   filesTotal: number;
   filesDone: number;
+  aiRiskScore: number | null;
   riskScore: number | null;
   risk: RiskResult | null;
   summary: string | null;
@@ -33,7 +34,7 @@ export function createFakeStore(
     provider?: FakeReview['provider'];
     settings?: Record<string, unknown>;
     pr?: Partial<ReviewContext['pr']>;
-    riskScore?: number | null;
+    aiRiskScore?: number | null;
     summary?: string | null;
     issues?: ReviewIssue[];
   } = {},
@@ -48,7 +49,8 @@ export function createFakeStore(
     errorMessage: null,
     filesTotal: 0,
     filesDone: 0,
-    riskScore: init.riskScore ?? null,
+    aiRiskScore: init.aiRiskScore ?? null,
+    riskScore: null,
     risk: null,
     summary: init.summary ?? null,
     githubReviewId: null,
@@ -86,7 +88,7 @@ export function createFakeStore(
           status: review.status,
           provider: review.provider,
           headSha: review.headSha,
-          riskScore: review.riskScore,
+          aiRiskScore: review.aiRiskScore,
           summary: review.summary,
           githubReviewId: review.githubReviewId,
         },
@@ -103,6 +105,7 @@ export function createFakeStore(
         errorMessage: null,
         filesTotal: 0,
         filesDone: 0,
+        aiRiskScore: null,
         riskScore: null,
         risk: null,
         summary: null,
@@ -132,7 +135,7 @@ export function createFakeStore(
     },
     async finishChunks(_id, d) {
       review.filesDone = d.filesDone;
-      review.riskScore = d.aiRiskScore === null ? null : Math.round(d.aiRiskScore);
+      review.aiRiskScore = d.aiRiskScore === null ? null : Math.round(d.aiRiskScore);
       review.errorCode = d.errorCode;
       review.errorMessage = d.errorMessage;
     },
