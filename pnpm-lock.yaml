@@ -47,9 +47,21 @@ importers:
 
   .:
     devDependencies:
+      '@app/db':
+        specifier: workspace:*
+        version: link:packages/db
+      '@app/github':
+        specifier: workspace:*
+        version: link:packages/github
+      '@app/shared':
+        specifier: workspace:*
+        version: link:packages/shared
       '@eslint/js':
         specifier: 'catalog:'
         version: 9.39.5
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.5
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
@@ -62,6 +74,9 @@ importers:
       prettier:
         specifier: 'catalog:'
         version: 3.10.1
+      tsx:
+        specifier: 'catalog:'
+        version: 4.23.15
       turbo:
         specifier: 'catalog:'
         version: 2.11.11

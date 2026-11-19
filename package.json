@@ -17,14 +17,21 @@
     "db:migrate": "pnpm --filter @app/db db:migrate",
     "db:deploy": "pnpm --filter @app/db db:deploy",
     "db:seed": "pnpm --filter @app/db db:seed",
-    "db:studio": "pnpm --filter @app/db db:studio"
+    "db:studio": "pnpm --filter @app/db db:studio",
+    "e2e": "tsx --env-file=.env scripts/e2e.ts",
+    "e2e:typecheck": "tsc -p scripts"
   },
   "devDependencies": {
+    "@app/db": "workspace:*",
+    "@app/github": "workspace:*",
+    "@app/shared": "workspace:*",
     "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
     "eslint": "catalog:",
     "eslint-config-prettier": "catalog:",
     "globals": "catalog:",
     "prettier": "catalog:",
+    "tsx": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
     "typescript-eslint": "catalog:"
