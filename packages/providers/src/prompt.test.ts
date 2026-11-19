@@ -5,8 +5,8 @@ import { samplePatch, sampleInput } from './test-fixtures';
 describe('annotatePatch', () => {
   it('numbers new-side lines and leaves removed lines unnumbered', () => {
     const out = annotatePatch(samplePatch).split('\n');
-    expect(out).toContain('    1 |  import { db } from \'./db\';');
-    expect(out).toContain("      | -export function getUser(id) {");
+    expect(out).toContain("    1 |  import { db } from './db';");
+    expect(out).toContain('      | -export function getUser(id) {');
     expect(out).toContain('    2 | +export async function getUser(id: string) {');
     expect(out).toContain('    5 | +  return rows[0];');
     expect(out).toContain('   23 | +  // unreachable');

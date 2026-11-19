@@ -12,7 +12,10 @@ import {
 const ctx = { orgId: 'org_1' };
 const noRepoModel = async () => undefined;
 
-function provider(fetchImpl: typeof fetch, env: NodeJS.ProcessEnv = { ANTHROPIC_API_KEY: 'sk-test' }) {
+function provider(
+  fetchImpl: typeof fetch,
+  env: NodeJS.ProcessEnv = { ANTHROPIC_API_KEY: 'sk-test' },
+) {
   return createPlatformProvider({ env, fetch: fetchImpl, repoModelLookup: noRepoModel });
 }
 
@@ -35,7 +38,10 @@ describe('platform provider (Anthropic)', () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse(200, anthropicMessage(JSON.stringify(validResultJson))),
     );
-    const res = await provider(fetchMock as unknown as typeof fetch).reviewChunk(sampleInput(), ctx);
+    const res = await provider(fetchMock as unknown as typeof fetch).reviewChunk(
+      sampleInput(),
+      ctx,
+    );
     expect(res).toEqual({ ...validResultJson, model: 'claude-opus-5-5' });
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -88,7 +94,9 @@ describe('platform provider (Anthropic)', () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse(status, { type: 'error', error: { type: 'x', message: 'nope' } }),
     );
-    expect(await codeOf(provider(fetchMock as unknown as typeof fetch).reviewChunk(sampleInput(), ctx))).toBe(code);
+    expect(
+      await codeOf(provider(fetchMock as unknown as typeof fetch).reviewChunk(sampleInput(), ctx)),
+    ).toBe(code);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -107,25 +115,27 @@ describe('platform provider (Anthropic)', () => {
 
   it('maps unparseable output to invalid_output', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, anthropicMessage('LGTM!')));
-    expect(await codeOf(provider(fetchMock as unknown as typeof fetch).reviewChunk(sampleInput(), ctx))).toBe(
-      'invalid_output',
-    );
+    expect(
+      await codeOf(provider(fetchMock as unknown as typeof fetch).reviewChunk(sampleInput(), ctx)),
+    ).toBe('invalid_output');
   });
 
   it('maps a refusal to invalid_output', async () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse(200, anthropicMessage('', { stop_reason: 'refusal', content: [] })),
     );
-    expect(await codeOf(provider(fetchMock as unknown as typeof fetch).reviewChunk(sampleInput(), ctx))).toBe(
-      'invalid_output',
-    );
+    expect(
+      await codeOf(provider(fetchMock as unknown as typeof fetch).reviewChunk(sampleInput(), ctx)),
+    ).toBe('invalid_output');
   });
 
   it('throws provider_auth when no key is configured', async () => {
     const fetchMock = vi.fn();
-    expect(await codeOf(provider(fetchMock as unknown as typeof fetch, {}).reviewChunk(sampleInput(), ctx))).toBe(
-      'provider_auth',
-    );
+    expect(
+      await codeOf(
+        provider(fetchMock as unknown as typeof fetch, {}).reviewChunk(sampleInput(), ctx),
+      ),
+    ).toBe('provider_auth');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -134,8 +144,13 @@ describe('platform provider (OpenAI fallback)', () => {
   const env = { OPENAI_API_KEY: 'sk-openai' };
 
   it('calls the Responses API when only OPENAI_API_KEY is set', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse(200, openaiResponse(JSON.stringify(validResultJson))));
-    const res = await provider(fetchMock as unknown as typeof fetch, env).reviewChunk(sampleInput(), ctx);
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, openaiResponse(JSON.stringify(validResultJson))),
+    );
+    const res = await provider(fetchMock as unknown as typeof fetch, env).reviewChunk(
+      sampleInput(),
+      ctx,
+    );
     expect(res).toEqual({ ...validResultJson, model: 'gpt-5' });
     const [url] = fetchMock.mock.calls[0] as unknown as [string];
     expect(String(url)).toContain('/responses');
@@ -149,8 +164,10 @@ describe('platform provider (OpenAI fallback)', () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse(status, { error: { message: 'x', type: 'x', code: errCode ?? null } }),
     );
-    expect(await codeOf(provider(fetchMock as unknown as typeof fetch, env).reviewChunk(sampleInput(), ctx))).toBe(
-      code,
-    );
+    expect(
+      await codeOf(
+        provider(fetchMock as unknown as typeof fetch, env).reviewChunk(sampleInput(), ctx),
+      ),
+    ).toBe(code);
   });
 });

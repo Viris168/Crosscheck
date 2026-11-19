@@ -18,7 +18,9 @@ const PROVIDERS: ActionProvider[] = ['claude_action', 'codex_action'];
 
 describe('renderWorkflow', () => {
   it.each(PROVIDERS)('%s matches snapshot', (provider) => {
-    expect(renderWorkflow(provider, { publicUrl: PUBLIC_URL, model: 'test-model' })).toMatchSnapshot();
+    expect(
+      renderWorkflow(provider, { publicUrl: PUBLIC_URL, model: 'test-model' }),
+    ).toMatchSnapshot();
   });
 
   it.each(PROVIDERS)('%s parses as YAML with the required shape', (provider) => {
@@ -51,7 +53,9 @@ describe('renderWorkflow', () => {
   });
 
   it('claude uses claude-code-action with the OAuth token secret', () => {
-    const wf = parse(renderWorkflow('claude_action', { publicUrl: PUBLIC_URL, model: 'm-1', maxTurns: 12 }));
+    const wf = parse(
+      renderWorkflow('claude_action', { publicUrl: PUBLIC_URL, model: 'm-1', maxTurns: 12 }),
+    );
     const agent = wf.jobs.review.steps[1];
     expect(agent.uses).toBe('anthropics/claude-code-action@v1');
     expect(agent.with.claude_code_oauth_token).toBe('${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}');
@@ -79,7 +83,9 @@ describe('renderWorkflow', () => {
   it('rejects unsafe options', () => {
     expect(() => renderWorkflow('claude_action', { publicUrl: 'not a url' })).toThrow();
     expect(() => renderWorkflow('claude_action', { publicUrl: 'ftp://x.example' })).toThrow();
-    expect(() => renderWorkflow('claude_action', { publicUrl: 'https://x.example/?a=1' })).toThrow();
+    expect(() =>
+      renderWorkflow('claude_action', { publicUrl: 'https://x.example/?a=1' }),
+    ).toThrow();
     expect(() =>
       renderWorkflow('claude_action', { publicUrl: PUBLIC_URL, model: 'm --dangerously' }),
     ).toThrow(/model/);
@@ -139,7 +145,12 @@ describe('openWorkflowPR', () => {
       expect.objectContaining({ ref: `refs/heads/${SETUP_BRANCH}`, sha: 'base-sha' }),
     );
     const put = calls.createOrUpdateFileContents.mock.calls[0]![0];
-    expect(put).toMatchObject({ owner: 'acme', repo: 'web', path: WORKFLOW_PATH, branch: SETUP_BRANCH });
+    expect(put).toMatchObject({
+      owner: 'acme',
+      repo: 'web',
+      path: WORKFLOW_PATH,
+      branch: SETUP_BRANCH,
+    });
     expect(put.sha).toBeUndefined();
     expect(Buffer.from(put.content, 'base64').toString('utf8')).toBe(yaml);
     const pr = calls.create.mock.calls[0]![0];
@@ -155,7 +166,11 @@ describe('openWorkflowPR', () => {
   });
 
   it('is idempotent: existing branch, file and PR are reused', async () => {
-    const { octokit, calls } = fakeOctokit({ branchExists: true, fileOn: [SETUP_BRANCH], openPr: true });
+    const { octokit, calls } = fakeOctokit({
+      branchExists: true,
+      fileOn: [SETUP_BRANCH],
+      openPr: true,
+    });
     const res = await openWorkflowPR(octokit, 'acme/web', 'claude_action', yaml);
     expect(res.prNumber).toBe(3);
     expect(calls.createOrUpdateFileContents.mock.calls[0]![0].sha).toBe(`sha-${SETUP_BRANCH}`);
@@ -188,6 +203,8 @@ describe('removeWorkflowPR', () => {
 
   it('throws when the workflow does not exist', async () => {
     const { octokit } = fakeOctokit();
-    await expect(removeWorkflowPR(octokit, 'acme/web')).rejects.toMatchObject({ code: 'github_error' });
+    await expect(removeWorkflowPR(octokit, 'acme/web')).rejects.toMatchObject({
+      code: 'github_error',
+    });
   });
 });

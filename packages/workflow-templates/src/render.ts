@@ -22,11 +22,17 @@ export const REQUIRED_SECRETS: Record<ActionProvider, readonly { name: string; h
       name: 'CLAUDE_CODE_OAUTH_TOKEN',
       how: 'run `claude setup-token` locally (needs a Claude Pro/Max/Team/Enterprise plan) and paste the token',
     },
-    { name: 'PLATFORM_INGEST_TOKEN', how: 'the ingest token shown once in the repo settings on the platform' },
+    {
+      name: 'PLATFORM_INGEST_TOKEN',
+      how: 'the ingest token shown once in the repo settings on the platform',
+    },
   ],
   codex_action: [
     { name: 'OPENAI_API_KEY', how: 'an OpenAI API key from platform.openai.com' },
-    { name: 'PLATFORM_INGEST_TOKEN', how: 'the ingest token shown once in the repo settings on the platform' },
+    {
+      name: 'PLATFORM_INGEST_TOKEN',
+      how: 'the ingest token shown once in the repo settings on the platform',
+    },
   ],
 };
 

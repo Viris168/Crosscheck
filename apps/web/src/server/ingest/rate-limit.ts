@@ -20,7 +20,10 @@ export async function allowIngest(tokenHash: string, now = Date.now()): Promise<
     if (count === 1) await redis.expire(key, INGEST_RATE_WINDOW_SECONDS);
     return count <= INGEST_RATE_LIMIT;
   } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'ingest rate limit unavailable');
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'ingest rate limit unavailable',
+    );
     return true;
   }
 }

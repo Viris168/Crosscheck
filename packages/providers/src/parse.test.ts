@@ -39,7 +39,13 @@ describe('parseModelOutput', () => {
   });
 
   it('strips unknown keys (e.g. a full ReviewResult)', () => {
-    const full = { schema_version: 1, repo: 'a/b', pr_number: 1, head_sha: 'x', ...validResultJson };
+    const full = {
+      schema_version: 1,
+      repo: 'a/b',
+      pr_number: 1,
+      head_sha: 'x',
+      ...validResultJson,
+    };
     expect(parseModelOutput(JSON.stringify(full))).toEqual(validResultJson);
   });
 

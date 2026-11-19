@@ -41,7 +41,10 @@ export function createCodexChatgptProvider(deps: CodexChatgptDeps = {}): ReviewP
     try {
       token = dec(cred.encryptedToken);
     } catch {
-      throw new ProviderError('provider_auth', 'codex_chatgpt: stored credential cannot be decrypted');
+      throw new ProviderError(
+        'provider_auth',
+        'codex_chatgpt: stored credential cannot be decrypted',
+      );
     }
 
     const expired = cred.expiresAt && cred.expiresAt.getTime() - EXPIRY_SKEW_MS <= now().getTime();
@@ -54,14 +57,19 @@ export function createCodexChatgptProvider(deps: CodexChatgptDeps = {}): ReviewP
     try {
       refreshToken = dec(cred.encryptedRefreshToken);
     } catch {
-      throw new ProviderError('provider_auth', 'codex_chatgpt: stored credential cannot be decrypted');
+      throw new ProviderError(
+        'provider_auth',
+        'codex_chatgpt: stored credential cannot be decrypted',
+      );
     }
     const oauth = deps.oauth ?? createChatgptOAuth({ env: deps.env, fetch: deps.fetch, now });
     const fresh = await oauth.refresh(refreshToken);
     await store.save(cred.id, {
       encryptedToken: enc(fresh.accessToken),
       // Refresh tokens rotate: keep the new one, or the old one if none was returned.
-      encryptedRefreshToken: fresh.refreshToken ? enc(fresh.refreshToken) : cred.encryptedRefreshToken,
+      encryptedRefreshToken: fresh.refreshToken
+        ? enc(fresh.refreshToken)
+        : cred.encryptedRefreshToken,
       expiresAt: fresh.expiresAt ?? null,
     });
     return fresh.accessToken;

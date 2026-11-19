@@ -31,7 +31,14 @@ function cred(expiresAt: Date | null, refresh: string | null = 'refresh_old'): S
 }
 
 /** Routes token endpoint vs. Responses API calls. */
-function http(tokenStatus = 200, tokenBody: unknown = { access_token: 'access_new', refresh_token: 'refresh_new', expires_in: 3600 }) {
+function http(
+  tokenStatus = 200,
+  tokenBody: unknown = {
+    access_token: 'access_new',
+    refresh_token: 'refresh_new',
+    expires_in: 3600,
+  },
+) {
   return vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
     const u = String(url);
     if (u.includes('auth.openai.com')) return jsonResponse(tokenStatus, tokenBody);
@@ -49,7 +56,13 @@ describe('codex_chatgpt provider', () => {
   it('uses the stored token when not expired (no refresh)', async () => {
     const { store, saves } = memoryStore(cred(new Date(NOW.getTime() + 3600_000)));
     const fetchMock = http();
-    const p = createCodexChatgptProvider({ env, store, fetch: fetchMock as unknown as typeof fetch, now: () => NOW, encryptionKey: key });
+    const p = createCodexChatgptProvider({
+      env,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => NOW,
+      encryptionKey: key,
+    });
 
     const res = await p.reviewChunk(sampleInput(), ctx);
     expect(res).toEqual({ ...validResultJson, model: 'gpt-5-codex' });
@@ -62,7 +75,13 @@ describe('codex_chatgpt provider', () => {
   it('refreshes an expired token, re-saves it encrypted, and uses the new token', async () => {
     const { store, saves } = memoryStore(cred(new Date(NOW.getTime() - 1000)));
     const fetchMock = http();
-    const p = createCodexChatgptProvider({ env, store, fetch: fetchMock as unknown as typeof fetch, now: () => NOW, encryptionKey: key });
+    const p = createCodexChatgptProvider({
+      env,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => NOW,
+      encryptionKey: key,
+    });
 
     await p.reviewChunk(sampleInput(), ctx);
 
@@ -85,7 +104,13 @@ describe('codex_chatgpt provider', () => {
   it('refreshes a token that is about to expire', async () => {
     const { store, saves } = memoryStore(cred(new Date(NOW.getTime() + 30_000)));
     const fetchMock = http();
-    const p = createCodexChatgptProvider({ env, store, fetch: fetchMock as unknown as typeof fetch, now: () => NOW, encryptionKey: key });
+    const p = createCodexChatgptProvider({
+      env,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => NOW,
+      encryptionKey: key,
+    });
     await p.reviewChunk(sampleInput(), ctx);
     expect(saves).toHaveLength(1);
   });
@@ -94,7 +119,13 @@ describe('codex_chatgpt provider', () => {
     const c = cred(new Date(NOW.getTime() - 1000));
     const { store, saves } = memoryStore(c);
     const fetchMock = http(200, { access_token: 'access_new', expires_in: 60 });
-    const p = createCodexChatgptProvider({ env, store, fetch: fetchMock as unknown as typeof fetch, now: () => NOW, encryptionKey: key });
+    const p = createCodexChatgptProvider({
+      env,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => NOW,
+      encryptionKey: key,
+    });
     await p.reviewChunk(sampleInput(), ctx);
     expect(saves[0]!.data.encryptedRefreshToken).toBe(c.encryptedRefreshToken);
   });
@@ -105,7 +136,13 @@ describe('codex_chatgpt provider', () => {
     ['refresh rejected (invalid_grant)', cred(new Date(0)), http(400, { error: 'invalid_grant' })],
   ])('throws provider_auth: %s', async (_name, c, fetchMock) => {
     const { store, saves } = memoryStore(c);
-    const p = createCodexChatgptProvider({ env, store, fetch: fetchMock as unknown as typeof fetch, now: () => NOW, encryptionKey: key });
+    const p = createCodexChatgptProvider({
+      env,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => NOW,
+      encryptionKey: key,
+    });
     const err = await p.reviewChunk(sampleInput(), ctx).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect((err as ProviderError).code).toBe('provider_auth');
@@ -114,8 +151,16 @@ describe('codex_chatgpt provider', () => {
 
   it('maps a 401 from the API to provider_auth', async () => {
     const { store } = memoryStore(cred(null));
-    const fetchMock = vi.fn(async () => jsonResponse(401, { error: { message: 'bad token', type: 'x', code: null } }));
-    const p = createCodexChatgptProvider({ env, store, fetch: fetchMock as unknown as typeof fetch, now: () => NOW, encryptionKey: key });
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(401, { error: { message: 'bad token', type: 'x', code: null } }),
+    );
+    const p = createCodexChatgptProvider({
+      env,
+      store,
+      fetch: fetchMock as unknown as typeof fetch,
+      now: () => NOW,
+      encryptionKey: key,
+    });
     const err = await p.reviewChunk(sampleInput(), ctx).catch((e: unknown) => e);
     expect((err as ProviderError).code).toBe('provider_auth');
   });
