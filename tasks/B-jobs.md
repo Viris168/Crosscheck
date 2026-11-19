@@ -46,6 +46,7 @@ Settings: `concurrency: { key: 'event.data.orgId', limit: 3 }` (3 reviews at onc
 5. Retries by `ProviderError.code`: `timeout` / `rate_limited` → retry (max 2); `invalid_output` → retry
    once (check `attempt`); `provider_auth` → throw `NonRetriableError`. Catch a chunk's final failure so the
    other chunks still run.
+   Save the max chunk `risk_score` to `Review.aiRiskScore` (never to `riskScore`).
 6. If some chunks fail but ≥ 1 succeeded → continue and record failed files in `errorMessage`.
    If all fail → status `failed` with the most specific `ErrorCode`, no finalize.
 7. `step.sendEvent('finalize', { name: 'review/finalize', data: { reviewId } })`.
@@ -54,7 +55,7 @@ Settings: `concurrency: { key: 'event.data.orgId', limit: 3 }` (3 reviews at onc
 1. Load review, issues, PR, files. Exit if already `completed` (idempotent).
 2. Drop issues whose file/line is not in the diff (`isLineInDiff`); sort by severity; cap at `maxIssuesPerPr`;
    filter by `minSeverity` for posting (keep all in DB).
-3. `computeRisk(...)` from `@app/scoring` → save `riskScore`, `riskLevel`, `riskFactors`.
+3. `computeRisk({ aiScores: [review.aiRiskScore], ... })` from `@app/scoring` → save `riskScore`, `riskLevel`, `riskFactors`.
 4. `postReview(...)` from `@app/github-comments` in its own `step.run` → save `githubReviewId`, mark issues `posted`.
 5. Set `completed`, `finishedAt`.
 `github_error` on post: retry (max 2), then `failed` / `github_error`.

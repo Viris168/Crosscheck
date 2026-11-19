@@ -33,7 +33,7 @@ Anything else (including `apps/web/src/server/jobs/` and `packages/shared`). You
 - Check `body.repo === repo.fullName`. Check the PR exists and is open, and `head_sha` matches a `Review` in
   `waiting_action` for that PR (or create one if the PR's current head matches). Otherwise 409.
 - Idempotent per `[pullRequestId, headSha, provider]`: second submit → 200 with `{ duplicate: true }`.
-- Save issues, `filesTotal = filesDone = changedFiles`, then
+- Save issues, `summary`, `aiRiskScore = result.risk_score`, `filesTotal = filesDone = changedFiles`, then
   `inngest.send({ name: 'review/finalize', data: { reviewId } })`. Return 202.
 - Rate limit: 30 requests / hour per token (Redis, client from `@/server/redis`) → 429.
 - Errors use `{ error: { code, message } }`.
