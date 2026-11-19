@@ -20,3 +20,12 @@ export {
 } from './fetch';
 export { signWebhookBody, verifyWebhookSignature } from './signature';
 export { MergeError, mergePullRequest, type MergeFailureReason, type MergeMethod } from './merge';
+export {
+  GithubApiError,
+  fetchOrgMembership,
+  fetchRepoPermission,
+  isRepoCollaborator,
+  listUserInstallationIds,
+  permissionAtLeast,
+  type RepoPermission,
+} from './permissions';
