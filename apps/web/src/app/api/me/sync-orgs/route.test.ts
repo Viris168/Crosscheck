@@ -1,9 +1,10 @@
 import { ApiErrorSchema, HttpError, SyncOrgsResponse } from '@app/shared';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   currentUser: null as string | null,
   redisDown: false,
+  expireFails: false,
   counters: new Map<string, number>(),
   expires: new Map<string, number>(),
 }));
@@ -32,6 +33,7 @@ vi.mock('@/server/redis', () => ({
       return n;
     }),
     expire: vi.fn(async (key: string, ttl: number) => {
+      if (state.expireFails) throw new Error('ECONNRESET');
       state.expires.set(key, ttl);
       return 1;
     }),
@@ -45,14 +47,25 @@ const call = () =>
     params: Promise.resolve({}),
   });
 
+const KEY = 'rl:sync-orgs:user_1:';
+
 beforeEach(() => {
+  // Start of a 60s window, so a burst of calls stays in one window.
+  vi.useFakeTimers({ now: new Date('2026-11-19T12:00:00Z'), toFake: ['Date'] });
   state.currentUser = 'user_1';
   state.redisDown = false;
+  state.expireFails = false;
   state.counters.clear();
   state.expires.clear();
   sync.mockReset();
   sync.mockResolvedValue({ joined: ['org_1'], left: [] });
 });
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const counterKey = () => [...state.counters.keys()].find((k) => k.startsWith(KEY));
 
 describe('POST /api/me/sync-orgs', () => {
   it('returns 401 without a session and does not sync', async () => {
@@ -68,8 +81,10 @@ describe('POST /api/me/sync-orgs', () => {
     expect(res.status).toBe(200);
     expect(SyncOrgsResponse.parse(await res.json())).toEqual({ joined: ['org_1'], left: [] });
     expect(sync).toHaveBeenCalledWith('user_1');
-    expect(state.counters.get('rl:sync-orgs:user_1')).toBe(1);
-    expect(state.expires.get('rl:sync-orgs:user_1')).toBe(60);
+    const key = counterKey();
+    expect(key).toMatch(/^rl:sync-orgs:user_1:\d+$/);
+    expect(state.counters.get(key!)).toBe(1);
+    expect(state.expires.get(key!)).toBe(60);
   });
 
   it('returns 429 rate_limited on the 6th call in a minute', async () => {
@@ -78,6 +93,20 @@ describe('POST /api/me/sync-orgs', () => {
     expect(res.status).toBe(429);
     expect(ApiErrorSchema.parse(await res.json()).error.code).toBe('rate_limited');
     expect(sync).toHaveBeenCalledTimes(5);
+  });
+
+  it('allows calls again in the next window', async () => {
+    for (let i = 0; i < 6; i++) await call();
+    vi.setSystemTime(new Date('2026-11-19T12:01:00Z'));
+    expect((await call()).status).toBe(200);
+  });
+
+  it('a failed EXPIRE does not lock the user out', async () => {
+    state.expireFails = true;
+    for (let i = 0; i < 6; i++) await call();
+    state.expireFails = false;
+    vi.setSystemTime(new Date('2026-11-19T12:01:00Z'));
+    expect((await call()).status).toBe(200);
   });
 
   it('limits per user', async () => {
