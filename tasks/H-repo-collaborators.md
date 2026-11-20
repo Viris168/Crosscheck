@@ -7,7 +7,7 @@ bottom. Each agent gets its own file `tasks/H*-*.md`; this file is the shared sp
 The client only installs the GitHub App. After that, GitHub is the source of truth:
 - **Who is in the org:** members of the client's GitHub org (or, for a personal account, the collaborators
   on its installed repos) join automatically when they sign in.
-- **Who can see a repo:** org members with at least **read** access to that repo on GitHub.
+- **Who can see a repo:** org members who are a **collaborator** on that repo on GitHub.
 - **Who can change a repo:** people with **write** access to that repo on GitHub.
 - **Who leaves:** people removed on GitHub lose access at their next sign-in, or right away via webhook.
 
@@ -17,7 +17,7 @@ There is no invite flow and no collaborator table. The client manages people on 
 | Action | Allowed if |
 |---|---|
 | Be in the org | GitHub org member (org install) or collaborator on an installed repo (personal install) |
-| View repo, PRs, reviews (incl. repo lists and overview totals) | org `owner`/`admin`, **or** org member whose GitHub permission on the repo is `read` or higher |
+| View repo, PRs, reviews (incl. repo lists and overview totals) | org `owner`/`admin`, **or** org member who is a GitHub collaborator on the repo (`GET /repos/{repo}/collaborators/{user}` → 204) |
 | Retry / cancel / rerun a review | same as view |
 | Change settings, rotate ingest token, open workflow PR, merge a PR | org `owner`/`admin` **or** GitHub permission on the repo is `write`, `maintain` or `admin` |
 | Change member roles | org `owner` |
@@ -25,6 +25,12 @@ There is no invite flow and no collaborator table. The client manages people on 
 You must be an org member first. A GitHub collaborator outside the org gets nothing (on an org install).
 A GitHub org member who can't open a private repo on GitHub (e.g. a team-restricted repo) can't see it here
 either: reviews contain code.
+
+**Why collaborator, not `read`:** GitHub reports `read` to every user on a public repo, so a `read` rule
+would show a member every public repo of the account. GitHub's collaborator check counts only people given
+access on purpose: collaborators on personal repos; for org repos also members with access through a team,
+the base permission or ownership. (Found in the real-account test: a collaborator on one repo saw all 22
+public repos of the account.)
 
 Permission levels, low to high: `none` < `read` < `triage` < `write` < `maintain` < `admin`.
 
@@ -139,14 +145,14 @@ Where it runs:
 
 ## Part 5: Repo access checks, routes and Members page (lane F)
 1. `apps/web/src/lib/server/access.ts`:
-   - `requireRepoAccess(userId, repoId)` now checks **read**: load the repo with `include: { installation: true }`,
+   - `requireRepoAccess(userId, repoId)` checks **collaborator**: load the repo with `include: { installation: true }`,
      `requireOrgMember(userId, repo.orgId)`; owner/admin pass without a GitHub call; otherwise `user.login`
-     must be set (403 "Link your GitHub account") and `getRepoPermission` must be `read`+ (else 403
-     `'No access to this repository on GitHub'`).
+     must be set (403 "Link your GitHub account") and `getRepoCollaborator` (cached like `getRepoPermission`)
+     must be true (else 403 `'No access to this repository on GitHub'`).
    - Add `requireRepoWrite(userId, repoId)`: same, but needs `write`+ (403
      `'Requires write access to this repository on GitHub'`).
    - Add `visibleRepoIds(userId, orgId): Promise<string[]>` for lists: owner/admin see all; members see repos
-     with `read`+ (permission lookups in parallel, at most 5 at a time). Drop a repo whose lookup errors.
+     they are a collaborator on (lookups in parallel, at most 5 at a time). Drop a repo whose lookup errors.
    - **Fail closed:** a GitHub error on a single-repo check gives a 502 `github_error`, never access.
    - Drop the `roles` parameter; `ADMIN_ROLES` stays only as the owner/admin shortcut.
 2. Switch to `requireRepoWrite`: `settings` (PUT), `ingest-token/rotate`, `setup/workflow-pr`,
@@ -240,7 +246,7 @@ Where it runs:
 - Commands: `pnpm turbo test --filter @app/github` and `pnpm --filter @app/web test -- src/lib src/server src/app/api`.
 
 ## Done when
-- A teammate in the client's GitHub org signs in and sees the repos they can open on GitHub, with no invite.
+- A teammate in the client's GitHub org signs in and sees the repos they were given access to on GitHub, with no invite.
 - Sign-in is still GitHub-only, and no code grants access by matching email addresses.
 - A collaborator with write access can save repo settings; one with read access gets 403.
 - Someone removed from the GitHub org loses access right away (webhook) or at their next sign-in.

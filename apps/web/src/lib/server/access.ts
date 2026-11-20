@@ -2,13 +2,13 @@ import 'server-only';
 import { prisma } from '@app/db';
 import { HttpError, type MemberRole } from '@app/shared';
 import { requireOrgMember } from '@/server/auth';
-import { getRepoPermission, permissionAtLeast, type RepoPermission } from '@/server/github';
+import { getRepoCollaborator, getRepoPermission, permissionAtLeast } from '@/server/github';
 import { logger } from '@/server/logger';
 
 /** Org roles that see and change every repo of the org without a GitHub permission check. */
 export const ADMIN_ROLES: readonly MemberRole[] = ['owner', 'admin'];
 
-/** Lookups in flight at once when filtering a repo list by GitHub permission. */
+/** Lookups in flight at once when filtering a repo list by GitHub collaborator status. */
 const VISIBLE_REPOS_CONCURRENCY = 5;
 
 const NO_LOGIN = 'Link your GitHub account';
@@ -37,20 +37,35 @@ async function loginOf(userId: string): Promise<string | null> {
   return user?.login ?? null;
 }
 
-function permissionOn(repo: RepoWithInstallation, login: string): Promise<RepoPermission> {
-  return getRepoPermission({
+function githubInput(repo: RepoWithInstallation, login: string) {
+  return {
     githubInstallationId: repo.installation.githubInstallationId,
     githubRepoId: repo.githubRepoId,
     fullName: repo.fullName,
     login,
-  });
+  };
 }
 
 /**
- * 404 if the repo doesn't exist; 403 unless the user is an org member with at least `need` on the
+ * Whether GitHub lets `login` `need` the repo. `view` asks for collaborator status, not `read`:
+ * GitHub reports `read` to everyone on a public repo, and members should only see the repos they
+ * were given access to. `write` asks for `write`+.
+ */
+async function hasAccess(
+  repo: RepoWithInstallation,
+  login: string,
+  need: 'view' | 'write',
+): Promise<boolean> {
+  return need === 'view'
+    ? getRepoCollaborator(githubInput(repo, login))
+    : permissionAtLeast(await getRepoPermission(githubInput(repo, login)), 'write');
+}
+
+/**
+ * 404 if the repo doesn't exist; 403 unless the user is an org member with `need` access on the
  * repo (org owner/admin always pass, without a GitHub call). A GitHub error → 502 (fail closed).
  */
-async function requireRepoPermission(userId: string, repoId: string, need: 'read' | 'write') {
+async function requireRepoPermission(userId: string, repoId: string, need: 'view' | 'write') {
   const repo = await loadRepo(repoId);
   const { role } = await requireOrgMember(userId, repo.orgId);
   if (isOrgAdmin(role)) return repo;
@@ -58,9 +73,9 @@ async function requireRepoPermission(userId: string, repoId: string, need: 'read
   const login = await loginOf(userId);
   if (!login) throw new HttpError('forbidden', NO_LOGIN);
 
-  let permission: RepoPermission;
+  let allowed: boolean;
   try {
-    permission = await permissionOn(repo, login);
+    allowed = await hasAccess(repo, login, need);
   } catch (err) {
     logger.warn(
       { userId, repoId, err: err instanceof Error ? err.message : String(err) },
@@ -68,15 +83,18 @@ async function requireRepoPermission(userId: string, repoId: string, need: 'read
     );
     throw githubError();
   }
-  if (!permissionAtLeast(permission, need)) {
+  if (!allowed) {
     throw new HttpError('forbidden', need === 'write' ? NO_WRITE : NO_READ);
   }
   return repo;
 }
 
-/** View a repo, its PRs and reviews (and retry/cancel/rerun): org owner/admin or GitHub `read`+. */
+/**
+ * View a repo, its PRs and reviews (and retry/cancel/rerun): org owner/admin, or a collaborator on
+ * the repo on GitHub.
+ */
 export function requireRepoAccess(userId: string, repoId: string) {
-  return requireRepoPermission(userId, repoId, 'read');
+  return requireRepoPermission(userId, repoId, 'view');
 }
 
 /** Change settings, rotate the ingest token, open the workflow PR, merge: owner/admin or `write`+. */
@@ -94,15 +112,15 @@ export async function canEditRepo(userId: string, repo: RepoWithInstallation): P
     if (isOrgAdmin(role)) return true;
     const login = await loginOf(userId);
     if (!login) return false;
-    return permissionAtLeast(await permissionOn(repo, login), 'write');
+    return await hasAccess(repo, login, 'write');
   } catch {
     return false;
   }
 }
 
 /**
- * Repo ids of the org the user may see: all of them for owner/admin; otherwise those with GitHub
- * `read`+ (at most 5 lookups at a time). A repo whose lookup errors is left out. Throws 403 unless
+ * Repo ids of the org the user may see: all of them for owner/admin; otherwise the repos they are a
+ * GitHub collaborator on (at most 5 lookups at a time). A repo whose lookup errors is left out. Throws 403 unless
  * the user is an org member.
  */
 export async function visibleRepoIds(userId: string, orgId: string): Promise<string[]> {
@@ -123,7 +141,7 @@ export async function visibleRepoIds(userId: string, orgId: string): Promise<str
       const i = next++;
       const repo = repos[i]!;
       try {
-        visible[i] = permissionAtLeast(await permissionOn(repo, login), 'read');
+        visible[i] = await hasAccess(repo, login, 'view');
       } catch (err) {
         logger.warn(
           { userId, repoId: repo.id, err: err instanceof Error ? err.message : String(err) },

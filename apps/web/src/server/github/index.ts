@@ -7,6 +7,7 @@ export {
   type RequestReviewResult,
 } from './reviews';
 export {
+  getRepoCollaborator,
   getRepoPermission,
   invalidateRepoPermission,
   permissionAtLeast,
