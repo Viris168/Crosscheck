@@ -12,8 +12,22 @@ export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
   return <textarea className={cn(field, 'min-h-24 font-mono', className)} {...props} />;
 }
 
+// Native <select> (keeps keyboard + mobile pickers) restyled: own chevron, hover state, dark popup.
+const chevron =
+  "bg-[url(\"data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%2371717a'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E\")] bg-size-[1rem] bg-position-[right_0.625rem_center] bg-no-repeat";
+
 export function Select({ className, ...props }: ComponentProps<'select'>) {
-  return <select className={cn(field, 'h-9 py-1 pr-8', className)} {...props} />;
+  return (
+    <select
+      className={cn(
+        field,
+        chevron,
+        'h-9 cursor-pointer appearance-none py-1 pr-9 font-medium transition-[color,background-color,box-shadow] hover:bg-accent disabled:cursor-not-allowed dark:scheme-dark',
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 export function Label({ className, ...props }: ComponentProps<'label'>) {
