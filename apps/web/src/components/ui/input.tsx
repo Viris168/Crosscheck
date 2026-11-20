@@ -12,8 +12,19 @@ export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
   return <textarea className={cn(field, 'min-h-24 font-mono', className)} {...props} />;
 }
 
+// Native <select> (keeps keyboard + mobile pickers) restyled: own chevron (`select-chevron` in
+// globals.css), hover state, dark popup.
 export function Select({ className, ...props }: ComponentProps<'select'>) {
-  return <select className={cn(field, 'h-9 py-1 pr-8', className)} {...props} />;
+  return (
+    <select
+      className={cn(
+        field,
+        'select-chevron h-9 cursor-pointer appearance-none py-1 pr-9 font-medium transition-[color,background-color,box-shadow] hover:bg-accent disabled:cursor-not-allowed dark:scheme-dark',
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 export function Label({ className, ...props }: ComponentProps<'label'>) {
