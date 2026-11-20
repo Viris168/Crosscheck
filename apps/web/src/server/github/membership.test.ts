@@ -53,6 +53,19 @@ afterAll(() => server.close());
 
 const notFound = () => HttpResponse.json({ message: 'Not Found' }, { status: 404 });
 
+/** GitHub's `GET /user` answer for the user token. null = the stored user (bob, GitHub id 7002). */
+let ghProfile: { id: number; login: string } | null = null;
+
+function githubUser() {
+  server.use(
+    http.get(`${API}/user`, ({ request }) => {
+      expect(request.headers.get('authorization')).toContain(USER_TOKEN);
+      const p = ghProfile ?? { id: 7002, login: String(fake.tables.user[0]?.login ?? 'bob') };
+      return HttpResponse.json({ ...p, avatar_url: `https://avatars/${p.login}` });
+    }),
+  );
+}
+
 /** `/user/installations` for the user token. */
 function userInstallations(ids: number[]) {
   server.use(
@@ -160,6 +173,8 @@ beforeEach(() => {
     accountId: '7002',
     userId: 'u-bob',
   });
+  ghProfile = null;
+  githubUser();
   userInstallations([]);
 });
 
@@ -382,14 +397,66 @@ describe('syncUserMemberships: candidates', () => {
     expect(requests.some((p) => p.startsWith('/orgs/'))).toBe(false);
   });
 
-  it('does nothing when the user has no GitHub login', async () => {
+  it('does nothing when there is no stored login and no usable token', async () => {
     fake.tables.user[0]!.login = null;
+    h.getAccessToken.mockRejectedValue(new Error('no account'));
     const { orgId } = addOrg('Acme', 'Organization', { ghInstallationId: 1 });
     addMember(orgId, 'u-bob', 'member');
 
     expect(await syncUserMemberships('u-bob')).toEqual({ joined: [], left: [] });
     expect(roleOf(orgId, 'u-bob')).toBe('member');
     expect(requests).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------- login from GitHub
+
+describe('syncUserMemberships: login from GitHub', () => {
+  // better-auth drops `input: false` fields from mapProfileToUser, so new users have no login.
+  it('fills a missing login from GET /user, then syncs with it', async () => {
+    fake.tables.user[0]!.login = null;
+    ghProfile = { id: 7002, login: 'bob' };
+    const { orgId } = addOrg('Acme', 'Organization', { ghInstallationId: 1 });
+    userInstallations([1]);
+    orgMemberships({ bob: { state: 'active', role: 'member' } });
+
+    expect(await syncUserMemberships('u-bob')).toEqual({ joined: [orgId], left: [] });
+    expect(fake.tables.user[0]).toMatchObject({ login: 'bob', avatarUrl: 'https://avatars/bob' });
+  });
+
+  it('follows a GitHub rename', async () => {
+    fake.tables.user[0]!.login = 'bob-old';
+    ghProfile = { id: 7002, login: 'bob' };
+    addOrg('Acme', 'Organization', { ghInstallationId: 1 });
+    userInstallations([1]);
+    orgMemberships({ bob: { state: 'active', role: 'member' } });
+
+    await syncUserMemberships('u-bob');
+    expect(fake.tables.user[0]!.login).toBe('bob');
+    expect(requests).toContain('/orgs/Acme/memberships/bob');
+  });
+
+  it('ignores a profile whose id is not the linked account', async () => {
+    fake.tables.user[0]!.login = null;
+    ghProfile = { id: 9999, login: 'mallory' };
+    addOrg('Acme', 'Organization', { ghInstallationId: 1 });
+    userInstallations([1]);
+
+    expect(await syncUserMemberships('u-bob')).toEqual({ joined: [], left: [] });
+    expect(fake.tables.user[0]!.login).toBeNull();
+    expect(requests.some((p) => p.startsWith('/orgs/'))).toBe(false);
+  });
+
+  it('uses the stored login when GET /user fails', async () => {
+    server.use(
+      http.get(`${API}/user`, () => HttpResponse.json({ message: 'Forbidden' }, { status: 403 })),
+    );
+    const { orgId } = addOrg('Acme', 'Organization', { ghInstallationId: 1 });
+    userInstallations([1]);
+    orgMemberships({ bob: { state: 'active', role: 'member' } });
+
+    expect(await syncUserMemberships('u-bob')).toEqual({ joined: [orgId], left: [] });
+    expect(fake.tables.user[0]!.login).toBe('bob');
   });
 });
 

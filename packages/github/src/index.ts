@@ -22,10 +22,12 @@ export { signWebhookBody, verifyWebhookSignature } from './signature';
 export { MergeError, mergePullRequest, type MergeFailureReason, type MergeMethod } from './merge';
 export {
   GithubApiError,
+  fetchAuthenticatedUser,
   fetchOrgMembership,
   fetchRepoPermission,
   isRepoCollaborator,
   listUserInstallationIds,
   permissionAtLeast,
+  type GithubUserProfile,
   type RepoPermission,
 } from './permissions';
