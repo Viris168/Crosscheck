@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   setCalls: [] as unknown[][],
   getInstallationOctokit: vi.fn(async (_id: number) => ({ fake: 'octokit' })),
   fetchRepoPermission: vi.fn(),
+  isRepoCollaborator: vi.fn(),
 }));
 
 vi.mock('@/server/redis', () => ({
@@ -24,9 +25,9 @@ vi.mock('@/server/redis', () => ({
       h.store.set(key, { value, ttl });
       return 'OK';
     },
-    del: async (key: string) => {
+    del: async (...keys: string[]) => {
       if (h.redisDown.value) throw new Error('ECONNREFUSED');
-      return h.store.delete(key) ? 1 : 0;
+      return keys.filter((k) => h.store.delete(k)).length;
     },
   }),
 }));
@@ -39,12 +40,15 @@ vi.mock('@app/github', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getInstallationOctokit: h.getInstallationOctokit,
   fetchRepoPermission: h.fetchRepoPermission,
+  isRepoCollaborator: h.isRepoCollaborator,
 }));
 
-const { getRepoPermission, invalidateRepoPermission, permissionAtLeast } = await import('./index');
+const { getRepoCollaborator, getRepoPermission, invalidateRepoPermission, permissionAtLeast } =
+  await import('./index');
 
 const input = { githubInstallationId: 7, githubRepoId: 42, fullName: 'acme/web', login: 'Octo' };
 const KEY = 'gh:perm:42:octo';
+const COLLAB_KEY = 'gh:collab:42:octo';
 
 beforeEach(() => {
   h.store.clear();
@@ -52,6 +56,7 @@ beforeEach(() => {
   h.redisDown.value = false;
   h.getInstallationOctokit.mockClear();
   h.fetchRepoPermission.mockReset();
+  h.isRepoCollaborator.mockReset();
 });
 
 describe('getRepoPermission', () => {
@@ -117,11 +122,43 @@ describe('getRepoPermission', () => {
   });
 });
 
+describe('getRepoCollaborator', () => {
+  it('on a cache miss asks GitHub with the installation token and caches for 300s', async () => {
+    h.isRepoCollaborator.mockResolvedValue(true);
+    await expect(getRepoCollaborator(input)).resolves.toBe(true);
+    expect(h.getInstallationOctokit).toHaveBeenCalledWith(7);
+    expect(h.isRepoCollaborator).toHaveBeenCalledWith({ fake: 'octokit' }, 'acme/web', 'Octo');
+    expect(h.store.get(COLLAB_KEY)).toEqual({ value: 'yes', ttl: 300 });
+  });
+
+  it('caches false too, and a cache hit does not call GitHub', async () => {
+    h.isRepoCollaborator.mockResolvedValue(false);
+    await expect(getRepoCollaborator(input)).resolves.toBe(false);
+    await expect(getRepoCollaborator(input)).resolves.toBe(false);
+    expect(h.isRepoCollaborator).toHaveBeenCalledTimes(1);
+    expect(h.store.get(COLLAB_KEY)?.value).toBe('no');
+  });
+
+  it('never caches an error and rethrows it', async () => {
+    h.isRepoCollaborator.mockRejectedValue(new ProviderError('github_error', 'boom'));
+    await expect(getRepoCollaborator(input)).rejects.toThrow('boom');
+    expect(h.store.has(COLLAB_KEY)).toBe(false);
+  });
+
+  it('when Redis is down, skips the cache and calls GitHub directly', async () => {
+    h.redisDown.value = true;
+    h.isRepoCollaborator.mockResolvedValue(true);
+    await expect(getRepoCollaborator(input)).resolves.toBe(true);
+  });
+});
+
 describe('invalidateRepoPermission', () => {
-  it('drops the cached entry (case-insensitive login)', async () => {
+  it('drops both cached answers (case-insensitive login)', async () => {
     h.store.set(KEY, { value: 'write', ttl: 300 });
+    h.store.set(COLLAB_KEY, { value: 'yes', ttl: 300 });
     await invalidateRepoPermission(42, 'OCTO');
     expect(h.store.has(KEY)).toBe(false);
+    expect(h.store.has(COLLAB_KEY)).toBe(false);
 
     h.fetchRepoPermission.mockResolvedValue('none');
     await expect(getRepoPermission(input)).resolves.toBe('none');
