@@ -1,7 +1,7 @@
 // Public entry for lane B (Jobs). Other lanes import `inngest` from '@/server/jobs' to send events.
 import type { InngestFunction } from 'inngest';
 import { inngest } from './client';
-import { memberSync, reviewFinalize, reviewStart, reviewSweep } from './functions';
+import { memberPrune, memberSync, reviewFinalize, reviewStart, reviewSweep } from './functions';
 
 export { inngest };
 
@@ -11,4 +11,5 @@ export const functions: InngestFunction.Any[] = [
   reviewFinalize,
   reviewSweep,
   memberSync,
+  memberPrune,
 ];

@@ -143,6 +143,13 @@ Where it runs:
 - Unknown users (never signed in) are a no-op. Add zod payload schemas in `payloads.ts`.
 - `// VERIFY:` both payload shapes against GitHub's webhook docs.
 
+**Personal installs get no `member` webhooks.** GitHub sends them only to installations with the Members
+permission, which personal accounts can't grant (found in the real-account test). A scheduled job,
+`member-prune` (lane B, every 30 minutes), runs `pruneRemovedMembers()` (lane A): a removals-only
+`syncUserMemberships(userId, { removalsOnly: true })` for every member, with the stored login and
+installation tokens only. It also catches org webhooks missed while the app was down. Repo access ends sooner,
+within the 5-minute permission cache.
+
 ## Part 5: Repo access checks, routes and Members page (lane F)
 1. `apps/web/src/lib/server/access.ts`:
    - `requireRepoAccess(userId, repoId)` checks **collaborator**: load the repo with `include: { installation: true }`,

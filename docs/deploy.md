@@ -150,9 +150,16 @@ GitHub → Settings → Developer settings → GitHub Apps → New (or under you
   If the refresh token has expired too, the sync can only remove access until the user signs in again.
 - Generate a **private key** (.pem) and a **client secret**. Note App ID + Client ID.
 
-<!-- VERIFY: /user/installations accepts the stored GitHub App user token; Member event needs the
-Members org permission (and how it behaves on personal installs); a missing Members permission
-answers 403 (not 404). -->
+- **Personal-account installs** never get the Members permission (it's an organization permission), and
+  GitHub sends `member` webhooks only to installations that hold it. Seen on 2026-11-20: adding and removing a
+  collaborator on a personal install sent no webhook at all. So on personal installs, removal works like this:
+  repo access ends within 5 minutes (the permission cache expires and GitHub's collaborator check fails),
+  and the membership itself is removed by the `member-prune` job (every 30 minutes), the person's next
+  sign-in, or **Check again**. Organization installs still get the instant `organization`/`member` webhooks;
+  the prune also catches any they miss while the app is down.
+
+<!-- VERIFY: a missing Members permission answers 403 (not 404). Confirmed: /user/installations accepts the
+stored GitHub App user token. -->
 
 #### Upgrading an existing install
 Adding Members **Read** and the Organization/Member events changes the App's permissions, so GitHub asks

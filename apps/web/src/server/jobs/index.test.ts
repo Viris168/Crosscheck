@@ -6,9 +6,15 @@ describe('@/server/jobs', () => {
     expect(inngest.id).toBe('ai-review');
   });
 
-  it('registers review-start, review-finalize, review-sweep and member-sync', () => {
+  it('registers review-start, review-finalize, review-sweep, member-sync and member-prune', () => {
     const ids = functions.map((f) => f.id());
-    expect(ids).toEqual(['review-start', 'review-finalize', 'review-sweep', 'member-sync']);
+    expect(ids).toEqual([
+      'review-start',
+      'review-finalize',
+      'review-sweep',
+      'member-sync',
+      'member-prune',
+    ]);
   });
 
   it('configures triggers, per-org concurrency and retries', () => {
@@ -19,13 +25,14 @@ describe('@/server/jobs', () => {
           appPrefix: 'ai-review',
         })[0],
     );
-    const [start, finalize, sweep, memberSync] = configs;
+    const [start, finalize, sweep, memberSync, memberPrune] = configs;
     expect(start?.triggers).toEqual([{ event: 'review/requested' }]);
     expect(start?.concurrency).toEqual({ key: 'event.data.orgId', limit: 3 });
     expect(finalize?.triggers).toEqual([{ event: 'review/finalize' }]);
     expect(sweep?.triggers).toEqual([{ cron: '*/5 * * * *' }]);
     expect(memberSync?.triggers).toEqual([{ event: 'user/signed-in' }]);
     expect(memberSync?.concurrency).toEqual({ key: 'event.data.userId', limit: 1 });
+    expect(memberPrune?.triggers).toEqual([{ cron: '*/30 * * * *' }]);
     expect(start?.steps?.step?.retries).toEqual({ attempts: 2 }); // = retries (2 retries after the first try);
   });
 });

@@ -38,6 +38,9 @@ type Verdict =
 
 const errMessage = (err: unknown) => (err instanceof Error ? err.message : 'unknown');
 
+/** Collaborator checks in flight at once for a personal install (one per active repo). */
+const COLLABORATOR_CHECKS_AT_ONCE = 5;
+
 interface UserToken {
   token: string;
   /** The linked GitHub account's numeric id (`Account.accountId`). */
@@ -137,11 +140,14 @@ async function decide(c: Candidate, login: string): Promise<Verdict | null> {
       return { inOrg: true, ownerEligible: true };
     }
     // Never `fetchRepoPermission !== 'none'`: public repos report `read` for every user.
+    // Batches of 5 in parallel; stops after the first batch with a hit.
     const octokit = await getInstallationOctokit(c.githubInstallationId);
-    for (const repo of c.repos) {
-      if (await isRepoCollaborator(octokit, repo.fullName, login)) {
-        return { inOrg: true, ownerEligible: false };
-      }
+    for (let i = 0; i < c.repos.length; i += COLLABORATOR_CHECKS_AT_ONCE) {
+      const batch = c.repos.slice(i, i + COLLABORATOR_CHECKS_AT_ONCE);
+      const hits = await Promise.all(
+        batch.map((repo) => isRepoCollaborator(octokit, repo.fullName, login)),
+      );
+      if (hits.some(Boolean)) return { inOrg: true, ownerEligible: false };
     }
     return { inOrg: false };
   }
@@ -178,7 +184,18 @@ async function addMember(orgId: string, userId: string, ownerEligible: boolean):
  * repo. Each candidate is decided with the installation token. Any error skips that org and leaves
  * its rows unchanged: an error never adds or removes anyone.
  */
-export async function syncUserMemberships(userId: string): Promise<SyncResult> {
+export interface SyncOptions {
+  /**
+   * Only re-check the orgs the user is already in, with the stored login and installation tokens; the
+   * user's own GitHub token isn't used, so nobody joins. For the scheduled prune.
+   */
+  removalsOnly?: boolean;
+}
+
+export async function syncUserMemberships(
+  userId: string,
+  options: SyncOptions = {},
+): Promise<SyncResult> {
   const result: SyncResult = { joined: [], left: [] };
 
   const user = await prisma.user.findUnique({
@@ -186,7 +203,7 @@ export async function syncUserMemberships(userId: string): Promise<SyncResult> {
     select: { login: true, avatarUrl: true },
   });
   if (!user) return result;
-  const gh = await getUserToken(userId);
+  const gh = options.removalsOnly ? null : await getUserToken(userId);
   const login = gh ? await refreshLogin(userId, user, gh) : user.login;
   if (!login) {
     logger.info({ userId }, 'membership sync skipped: user has no GitHub login');
@@ -262,4 +279,24 @@ export async function syncUserMemberships(userId: string): Promise<SyncResult> {
   }
 
   return result;
+}
+
+/**
+ * Runs a removals-only sync for every user with a membership, so people GitHub no longer lists lose
+ * their membership without waiting for their next sign-in. GitHub sends no `member` webhook to
+ * installations on personal accounts (they can't hold the org Members permission), and an org
+ * webhook can be missed while the app is down. One user's failure doesn't stop the others.
+ */
+export async function pruneRemovedMembers(): Promise<{ users: number; left: number }> {
+  const rows = await prisma.member.findMany({ where: {}, select: { userId: true } });
+  const userIds = [...new Set(rows.map((r) => r.userId))];
+  let left = 0;
+  for (const userId of userIds) {
+    try {
+      left += (await syncUserMemberships(userId, { removalsOnly: true })).left.length;
+    } catch (err) {
+      logger.warn({ userId, err: errMessage(err) }, 'member prune: user skipped');
+    }
+  }
+  return { users: userIds.length, left };
 }
