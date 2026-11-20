@@ -52,11 +52,13 @@ export async function listMembers(
     }),
     prisma.installation.count({ where: { orgId, needsMemberPermission: true } }),
   ]);
-  const members = rows.map(toOrgMember).sort(
-    (a, b) =>
-      ROLE_ORDER[a.role] - ROLE_ORDER[b.role] ||
-      (a.login ?? a.name).localeCompare(b.login ?? b.name),
-  );
+  const members = rows
+    .map(toOrgMember)
+    .sort(
+      (a, b) =>
+        ROLE_ORDER[a.role] - ROLE_ORDER[b.role] ||
+        (a.login ?? a.name).localeCompare(b.login ?? b.name),
+    );
   return { members, needsMemberPermission: flagged > 0 };
 }
 

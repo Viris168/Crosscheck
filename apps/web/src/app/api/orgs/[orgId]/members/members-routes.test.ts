@@ -61,8 +61,9 @@ const db = vi.hoisted(() => {
   return {
     member,
     installation: {
-      count: vi.fn(async ({ where }: { where: { orgId: string } }) =>
-        state.flaggedInstallations.get(where.orgId) ?? 0,
+      count: vi.fn(
+        async ({ where }: { where: { orgId: string } }) =>
+          state.flaggedInstallations.get(where.orgId) ?? 0,
       ),
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({ member })),
