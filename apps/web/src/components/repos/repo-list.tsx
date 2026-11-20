@@ -15,11 +15,34 @@ export function needsSetup(repo: Pick<RepoListItem, 'provider' | 'hasIngestToken
   return isActionProvider(repo.provider) && !repo.hasIngestToken;
 }
 
-/** `installUrl`: GitHub's install page for our App (null when unknown). */
-export function RepoList({ installUrl = null }: { installUrl?: string | null }) {
+/**
+ * `installUrl`: GitHub's install page for our App (null when unknown).
+ * `canManage`: the viewer is an org owner/admin. Members only see the repos they are a GitHub
+ * collaborator on, so an empty list means "no access yet", not "nothing installed".
+ */
+export function RepoList({
+  installUrl = null,
+  canManage = true,
+}: {
+  installUrl?: string | null;
+  canManage?: boolean;
+}) {
   const { data, error, isPending } = useRepos();
   if (isPending) return <LoadingState label="Loading repositories…" />;
   if (error) return <QueryError error={error} what="organization" />;
+  if (data.length === 0 && !canManage) {
+    return (
+      <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+        <p className="font-medium text-foreground">
+          You don&apos;t have access to any repositories here yet.
+        </p>
+        <p>
+          You see the repositories you&apos;re a collaborator on in GitHub. Ask an owner of this
+          organization to add you.
+        </p>
+      </div>
+    );
+  }
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
