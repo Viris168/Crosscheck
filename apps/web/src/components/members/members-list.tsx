@@ -107,7 +107,9 @@ function MemberTable({
     <Card>
       {update.error && (
         <div className="px-5 pt-4">
-          <Alert tone="error">{update.error.message || 'Could not change the role. Try again.'}</Alert>
+          <Alert tone="error">
+            {update.error.message || 'Could not change the role. Try again.'}
+          </Alert>
         </div>
       )}
       <CardContent className="p-0">
