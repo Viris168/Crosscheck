@@ -1,9 +1,10 @@
 // Inngest function definitions. Handlers live in review-*.ts and take their dependencies explicitly.
 import { LIMITS, REVIEW_SWEEP_CRON } from '@app/shared';
-import { syncUserMemberships } from '@/server/github';
+import { pruneRemovedMembers, syncUserMemberships } from '@/server/github';
 import { logger } from '@/server/logger';
 import { inngest } from './client';
 import { realDeps, type JobDeps, type StepTools } from './deps';
+import { MEMBER_PRUNE_CRON, memberPruneHandler } from './member-prune';
 import { memberSyncHandler } from './member-sync';
 import { reviewFinalizeHandler } from './review-finalize';
 import { reviewStartHandler } from './review-start';
@@ -59,4 +60,15 @@ export const memberSync = inngest.createFunction(
   { event: 'user/signed-in' },
   ({ event, step }) =>
     memberSyncHandler({ event, step: tools(step) }, { sync: syncUserMemberships, log: logger }),
+);
+
+/**
+ * Every 30 minutes, removes memberships GitHub no longer backs (removals only). One run at a time.
+ * VERIFY: with no `retries` set, inngest v3 retries a failed step 3 times (4 attempts).
+ */
+export const memberPrune = inngest.createFunction(
+  { id: 'member-prune', concurrency: { limit: 1 } },
+  { cron: MEMBER_PRUNE_CRON },
+  ({ step }) =>
+    memberPruneHandler({ step: tools(step) }, { prune: pruneRemovedMembers, log: logger }),
 );

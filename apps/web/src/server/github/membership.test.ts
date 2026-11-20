@@ -38,7 +38,7 @@ vi.mock('@app/github', async (importOriginal) => ({
   getInstallationOctokit: h.getInstallationOctokit,
 }));
 
-const { syncUserMemberships } = await import('./membership');
+const { pruneRemovedMembers, syncUserMemberships } = await import('./membership');
 
 // ---------------------------------------------------------------- GitHub (msw)
 
@@ -288,16 +288,26 @@ describe('syncUserMemberships: personal install', () => {
     expect(requests.some((p) => p.includes('/collaborators/'))).toBe(false);
   });
 
-  it('a collaborator on any active repo joins as member (stops at the first hit)', async () => {
+  it('a collaborator on any active repo joins as member', async () => {
     const { orgId } = addOrg('carol', 'User', { ghInstallationId: 2, repos });
     userInstallations([2]);
-    collaborators(['carol/app:bob']);
+    collaborators(['carol/site:bob']);
 
     expect(await syncUserMemberships('u-bob')).toEqual({ joined: [orgId], left: [] });
     expect(roleOf(orgId, 'u-bob')).toBe('member');
-    expect(requests.filter((p) => p.includes('/collaborators/'))).toEqual([
-      '/repos/carol/app/collaborators/bob',
-    ]);
+  });
+
+  it('checks repos 5 at a time and stops after the batch with a hit', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ fullName: `carol/r${i + 10}` }));
+    addOrg('carol', 'User', { ghInstallationId: 2, repos: many });
+    userInstallations([2]);
+    collaborators(['carol/r11:bob']);
+
+    await syncUserMemberships('u-bob');
+    // Repos are checked in name order: r10..r14 is the first batch, and r11 is in it.
+    expect(requests.filter((p) => p.includes('/collaborators/')).sort()).toEqual(
+      ['r10', 'r11', 'r12', 'r13', 'r14'].map((r) => `/repos/carol/${r}/collaborators/bob`),
+    );
   });
 
   it('a stranger does not join, even on a public repo where GitHub reports read', async () => {
@@ -546,5 +556,67 @@ describe('syncUserMemberships: skips and errors', () => {
         expect(Object.keys(ctx).every((k) => ['userId', 'orgId', 'err'].includes(k))).toBe(true);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------- scheduled prune
+
+describe('syncUserMemberships: removalsOnly', () => {
+  it("never uses the user's token and never joins", async () => {
+    const acme = addOrg('Acme', 'Organization', { ghInstallationId: 1 });
+    userInstallations([1]);
+    orgMemberships({ bob: { state: 'active', role: 'member' } });
+
+    expect(await syncUserMemberships('u-bob', { removalsOnly: true })).toEqual({
+      joined: [],
+      left: [],
+    });
+    expect(h.getAccessToken).not.toHaveBeenCalled();
+    expect(roleOf(acme.orgId, 'u-bob')).toBeUndefined();
+    expect(requests).not.toContain('/user');
+  });
+
+  it('removes a membership GitHub no longer backs, using the stored login', async () => {
+    const repos = [{ fullName: 'carol/app' }];
+    const { orgId } = addOrg('carol', 'User', { ghInstallationId: 2, repos });
+    addMember(orgId, 'u-bob', 'member');
+    collaborators([]);
+
+    expect(await syncUserMemberships('u-bob', { removalsOnly: true })).toEqual({
+      joined: [],
+      left: [orgId],
+    });
+    expect(requests).toContain('/repos/carol/app/collaborators/bob');
+  });
+});
+
+describe('pruneRemovedMembers', () => {
+  it('re-checks every member once and removes only those GitHub no longer lists', async () => {
+    const repos = [{ fullName: 'carol/app' }];
+    const { orgId } = addOrg('carol', 'User', { ghInstallationId: 2, repos });
+    fake.tables.user.push({ id: 'u-dan', login: 'dan' });
+    addMember(orgId, 'u-carol', 'owner');
+    addMember(orgId, 'u-bob', 'member');
+    addMember(orgId, 'u-dan', 'member');
+    fake.tables.user.push({ id: 'u-carol', login: 'carol' });
+    collaborators(['carol/app:dan']);
+
+    expect(await pruneRemovedMembers()).toEqual({ users: 3, left: 1 });
+    expect(roleOf(orgId, 'u-bob')).toBeUndefined();
+    expect(roleOf(orgId, 'u-dan')).toBe('member');
+    expect(roleOf(orgId, 'u-carol')).toBe('owner');
+    expect(h.getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('a GitHub error changes nothing', async () => {
+    const { orgId } = addOrg('carol', 'User', {
+      ghInstallationId: 2,
+      repos: [{ fullName: 'carol/app' }],
+    });
+    addMember(orgId, 'u-bob', 'member');
+    collaborators([], 403);
+
+    expect(await pruneRemovedMembers()).toEqual({ users: 1, left: 0 });
+    expect(roleOf(orgId, 'u-bob')).toBe('member');
   });
 });
