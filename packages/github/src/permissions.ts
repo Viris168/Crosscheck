@@ -152,3 +152,28 @@ export async function listUserInstallationIds(
   }
   return ids;
 }
+
+/** The GitHub account behind a user-to-server token. */
+export interface GithubUserProfile {
+  id: number;
+  login: string;
+  avatarUrl: string;
+}
+
+/**
+ * GET /user with a user-to-server token. Builds its own Octokit from the token (no app JWT).
+ *
+ * @throws GithubApiError on failure (e.g. `.status === 401` for an expired token).
+ */
+export async function fetchAuthenticatedUser(
+  userToken: string,
+  options: { octokit?: Octokit } = {},
+): Promise<GithubUserProfile> {
+  const octokit = options.octokit ?? createOctokit({ auth: userToken });
+  try {
+    const { data } = await octokit.rest.users.getAuthenticated();
+    return { id: data.id, login: data.login, avatarUrl: data.avatar_url };
+  } catch (err) {
+    throw toApiError(err, 'users.getAuthenticated');
+  }
+}

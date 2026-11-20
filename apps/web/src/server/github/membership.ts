@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@app/db';
 import {
   GithubApiError,
+  fetchAuthenticatedUser,
   fetchOrgMembership,
   getInstallationOctokit,
   isRepoCollaborator,
@@ -37,17 +38,23 @@ type Verdict =
 
 const errMessage = (err: unknown) => (err instanceof Error ? err.message : 'unknown');
 
+interface UserToken {
+  token: string;
+  /** The linked GitHub account's numeric id (`Account.accountId`). */
+  githubId: string;
+}
+
 /**
  * The user's GitHub App user-to-server token, refreshed by Better Auth when it has expired.
  * Returns null (never throws) when there is no usable token.
  */
-async function getUserToken(userId: string): Promise<string | null> {
+async function getUserToken(userId: string): Promise<UserToken | null> {
   try {
     // better-auth 1.7.25 selects the account by its row id (`{ accountId, userId }`, strict
     // schema); the spec's `{ providerId: 'github', userId }` is rejected with a 400.
     const account = await prisma.account.findFirst({
       where: { userId, providerId: 'github' },
-      select: { id: true },
+      select: { id: true, accountId: true },
     });
     if (!account) {
       logger.info({ userId }, 'no GitHub account linked; removals only');
@@ -57,16 +64,48 @@ async function getUserToken(userId: string): Promise<string | null> {
     //         `body.userId` and refreshes expired GitHub App user tokens (8h expiry) with the
     //         stored refresh token (checked against better-auth 1.7.25 source, not a live app).
     const res = await auth.api.getAccessToken({ body: { accountId: account.id, userId } });
-    return res?.accessToken || null;
+    return res?.accessToken ? { token: res.accessToken, githubId: account.accountId } : null;
   } catch (err) {
     logger.info({ userId, err: errMessage(err) }, 'no usable GitHub user token; removals only');
     return null;
   }
 }
 
-async function joinCandidateInstallationIds(userId: string): Promise<number[]> {
-  const token = await getUserToken(userId);
-  if (!token) return [];
+/**
+ * Sets `user.login` / `avatarUrl` from GitHub with the user's own token and returns the login to use.
+ * better-auth 1.7.25 drops `input: false` fields returned by `mapProfileToUser`
+ * (`parseAdditionalUserInputFromProviderProfile`), so this is where `login` is set and kept current
+ * after a GitHub rename. The profile is trusted only when its numeric id matches the linked account.
+ * Falls back to the stored login on any error.
+ */
+async function refreshLogin(
+  userId: string,
+  stored: { login: string | null; avatarUrl: string | null },
+  gh: UserToken,
+): Promise<string | null> {
+  try {
+    const profile = await fetchAuthenticatedUser(gh.token);
+    if (String(profile.id) !== gh.githubId) {
+      logger.warn({ userId }, 'GitHub profile does not match the linked account; login unchanged');
+      return stored.login;
+    }
+    if (profile.login !== stored.login || profile.avatarUrl !== stored.avatarUrl) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { login: profile.login, avatarUrl: profile.avatarUrl },
+      });
+    }
+    return profile.login;
+  } catch (err) {
+    logger.info(
+      { userId, err: errMessage(err) },
+      'reading the GitHub profile failed; stored login used',
+    );
+    return stored.login;
+  }
+}
+
+async function joinCandidateInstallationIds(userId: string, token: string): Promise<number[]> {
   try {
     return await listUserInstallationIds(token);
   } catch (err) {
@@ -142,15 +181,20 @@ async function addMember(orgId: string, userId: string, ownerEligible: boolean):
 export async function syncUserMemberships(userId: string): Promise<SyncResult> {
   const result: SyncResult = { joined: [], left: [] };
 
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { login: true } });
-  const login = user?.login;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { login: true, avatarUrl: true },
+  });
+  if (!user) return result;
+  const gh = await getUserToken(userId);
+  const login = gh ? await refreshLogin(userId, user, gh) : user.login;
   if (!login) {
     logger.info({ userId }, 'membership sync skipped: user has no GitHub login');
     return result;
   }
 
   const [ghInstallationIds, memberships] = await Promise.all([
-    joinCandidateInstallationIds(userId),
+    gh ? joinCandidateInstallationIds(userId, gh.token) : Promise.resolve([]),
     prisma.member.findMany({ where: { userId }, select: { organizationId: true } }),
   ]);
   const memberOrgIds = new Set(memberships.map((m) => m.organizationId));

@@ -43,6 +43,12 @@ export function createFakeDb() {
     $queryRaw: async () => [],
     user: {
       findUnique: async ({ where }: any) => t.user.find((u) => u.id === where.id) ?? null,
+      update: async ({ where, data }: any) => {
+        const hit = t.user.find((u) => u.id === where.id);
+        if (!hit) throw new Error('not found');
+        Object.assign(hit, data);
+        return hit;
+      },
     },
     organization: {
       findFirst: async ({ where }: any) => {

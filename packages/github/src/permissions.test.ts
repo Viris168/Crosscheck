@@ -9,6 +9,7 @@ import {
   GithubApiError,
   isRepoCollaborator,
   listUserInstallationIds,
+  fetchAuthenticatedUser,
   permissionAtLeast,
   toGithubError,
   type RepoPermission,
@@ -229,6 +230,38 @@ describe('listUserInstallationIds', () => {
     server.use(http.get(url, () => HttpResponse.json({ message: 'Bad creds' }, { status: 401 })));
     const err = (await caught(
       listUserInstallationIds('ghu_secret', { octokit: octokit('ghu_secret') }),
+    )) as GithubApiError;
+    expect(err).toBeInstanceOf(GithubApiError);
+    expect(err.status).toBe(401);
+    expect(err.message).not.toContain('ghu_secret');
+  });
+});
+
+// ---------------------------------------------------------------- fetchAuthenticatedUser
+
+describe('fetchAuthenticatedUser', () => {
+  const url = `${API}/user`;
+
+  it("returns the token owner's id, login and avatar", async () => {
+    let auth: string | null = null;
+    server.use(
+      http.get(url, ({ request }) => {
+        auth = request.headers.get('authorization');
+        return HttpResponse.json({ id: 7002, login: 'bob', avatar_url: 'https://avatars/bob' });
+      }),
+    );
+    await expect(fetchAuthenticatedUser('ghu_user')).resolves.toEqual({
+      id: 7002,
+      login: 'bob',
+      avatarUrl: 'https://avatars/bob',
+    });
+    expect(auth).toBe('token ghu_user');
+  });
+
+  it('rethrows a 401 with its status and without the token', async () => {
+    server.use(http.get(url, () => HttpResponse.json({ message: 'Bad creds' }, { status: 401 })));
+    const err = (await caught(
+      fetchAuthenticatedUser('ghu_secret', { octokit: octokit('ghu_secret') }),
     )) as GithubApiError;
     expect(err).toBeInstanceOf(GithubApiError);
     expect(err.status).toBe(401);
