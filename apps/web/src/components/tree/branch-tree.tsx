@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useSyncTree, useTree } from '@/hooks/use-tree';
 import { ApiError } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
-import { layoutTree, TreeGraph } from './layout';
+import { layoutTree, squashShas, TreeGraph } from './layout';
 import { TreeDetails } from './tree-details';
 import { TreeSvg, type Selection } from './tree-svg';
 
@@ -30,9 +30,6 @@ const FAILURE: Partial<Record<ErrorCode, string>> = {
   timeout: 'Reading the commit history took too long.',
   rate_limited: 'GitHub rate-limited us while reading this repository.',
 };
-
-/** The snapshot can only show squares once it says which commits are squash merges (contract request). */
-const NO_SQUASH: ReadonlySet<string> = new Set();
 
 export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullName: string }) {
   const tree = useTree(repoId);
@@ -132,7 +129,10 @@ function TreeBody({
   const router = useRouter();
   const [selection, setSelection] = useState<Selection>({ type: 'repo' });
   const graph = useMemo(() => new TreeGraph(snapshot.commits), [snapshot]);
-  const layout = useMemo(() => layoutTree(snapshot, graph, NO_SQUASH), [snapshot, graph]);
+  const layout = useMemo(
+    () => layoutTree(snapshot, graph, squashShas(snapshot)),
+    [snapshot, graph],
+  );
   const repoName = repoFullName.split('/').pop() ?? repoFullName;
 
   const onEnter = (s: Selection) => {
@@ -181,6 +181,7 @@ function TreeBody({
             repoId={repoId}
             repoFullName={repoFullName}
             syncedAt={data.syncedAt}
+            canEdit={data.canEdit}
           />
         </Card>
       </aside>

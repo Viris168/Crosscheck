@@ -3,6 +3,7 @@
 import type { BranchNode, TreeSnapshot } from '@app/shared/client';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { CompareWithSelect } from './compare-with-select';
 import { branchesContaining, mergedLong, shortSha, whyLong, type TreeGraph } from './layout';
 import type { Selection } from './tree-svg';
 
@@ -41,6 +42,7 @@ export function TreeDetails({
   repoId,
   repoFullName,
   syncedAt,
+  canEdit = false,
 }: {
   snapshot: TreeSnapshot;
   graph: TreeGraph;
@@ -49,6 +51,8 @@ export function TreeDetails({
   repoId: string;
   repoFullName: string;
   syncedAt: string | null;
+  /** Write access: shows the "Compare with" select. */
+  canEdit?: boolean;
 }) {
   // VERIFY: github.com only (no GitHub Enterprise host is stored on Repo).
   const ghCommit = (sha: string) =>
@@ -126,7 +130,7 @@ export function TreeDetails({
         b.compareWith ? (
           <>
             <Code>{b.compareWith}</Code>
-            <span className="block text-xs text-muted-foreground">{whyLong(b)}</span>
+            <span className="block text-xs text-muted-foreground">{whyLong(b, canEdit)}</span>
           </>
         ) : (
           '– (this is the default branch)'
@@ -171,6 +175,9 @@ export function TreeDetails({
           Branch <Code>{b.name}</Code>
         </h2>
         <Kv rows={rows} />
+        {canEdit && !b.isDefault && (
+          <CompareWithSelect key={b.name} repoId={repoId} snapshot={snapshot} branch={b} />
+        )}
       </>
     );
   }

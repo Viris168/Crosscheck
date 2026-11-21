@@ -6,8 +6,10 @@ import {
   layoutTree,
   MAX_SHOWN,
   mergeNote,
+  squashShas,
   subLine,
   TreeGraph,
+  whyLong,
 } from './layout';
 
 const byName = (s = seedSnapshot()) => new Map(s.branches.map((b) => [b.name, b]));
@@ -132,5 +134,32 @@ describe('labels', () => {
     const m = byName();
     const same = { ...m.get('hotfix/header')!, headSha: SEED_SHA.c4!, ahead: 0 };
     expect(mergeNote(same, m)).toEqual({ text: 'same commit as main', tone: 'muted' });
+  });
+});
+
+describe('squashShas', () => {
+  it('collects merge commits of branches merged by squash', () => {
+    expect([...squashShas(seedSnapshot())]).toEqual([SEED_SHA.c4]);
+  });
+
+  it('skips other methods and missing SHAs; layoutTree marks the squares', () => {
+    const s = seedSnapshot();
+    const rows = layoutTree(s, new TreeGraph(s.commits), squashShas(s)).rows;
+    const c4 = rows[0]!.items.find((it) => it.kind === 'commit' && it.sha === SEED_SHA.c4);
+    expect(c4).toMatchObject({ isSquash: true });
+    const none = seedSnapshot({
+      branches: seedBranches.map((b) =>
+        b.merged ? { ...b, merged: { ...b.merged, method: 'merge' as const } } : b,
+      ),
+    });
+    expect(squashShas(none).size).toBe(0);
+  });
+});
+
+describe('whyLong', () => {
+  it('says "below" only when the Compare with select is shown', () => {
+    const b = { ...seedBranches[2]!, why: 'override' as const };
+    expect(whyLong(b, true)).toBe('Set by hand below.');
+    expect(whyLong(b)).toBe('Set by hand.');
   });
 });
