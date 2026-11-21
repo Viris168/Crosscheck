@@ -5,7 +5,6 @@ import { FixtureRepo } from '@app/git-graph/testing';
 import { TreeSnapshotSchema, type CiState, type ErrorCode, type TreeSnapshot } from '@app/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeRunner } from './__fixtures__/fake-step';
-import { treeGithubApi } from './deps';
 import {
   RepoBusyError,
   assertNoContents,
@@ -535,21 +534,5 @@ describe('planPrs', () => {
         [merged],
       ),
     ).toEqual({ create: [], update: [] });
-  });
-});
-
-describe('treeGithubApi (T2b until merged)', () => {
-  it('stubs missing T2b functions with a non-retriable error', async () => {
-    const api = treeGithubApi({});
-    const err = await api.listBranches({} as never, 'a/b').catch((e: Error) => e);
-    expect(err).toMatchObject({ name: 'NonRetriableError' });
-    expect((err as Error).message).toMatch(/^\[internal\] GitHub tree reads not available yet/);
-  });
-
-  it('uses the real functions once @app/github exports them', async () => {
-    const listBranches = vi.fn(async () => ({ defaultBranch: 'main', branches: [] }));
-    const api = treeGithubApi({ listBranches });
-    await api.listBranches({} as never, 'a/b');
-    expect(listBranches).toHaveBeenCalledWith({}, 'a/b');
   });
 });
