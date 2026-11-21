@@ -208,3 +208,13 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Why:** T2a/T2c need the cache dir; F builds the page (T2d) before the sync job exists.
 - **Workaround in use:** none.
 - **Status:** applied (PR feat/t0-contracts)
+
+### [Task T2d] Mark squash commits in `TreeSnapshot`
+- **Change:** add `mergeCommitSha: Sha.nullable()` to `BranchMergedSchema` (set when `via = 'pr'`, from
+  `PullRequest.mergeCommitSha`). Optional alternative: `squashShas: Sha[]` on `TreeSnapshotSchema`.
+- **Why:** the page draws squash commits as squares (prototype `renderTree`). A squash commit has one
+  parent, so the graph alone can't tell it apart; the snapshot has the PR's merge method but not which
+  commit it produced.
+- **Workaround in use:** `layoutTree(snapshot, graph, squashShas)` takes the set; the page passes an empty
+  set, so squash commits draw as normal circles until this lands.
+- **Status:** proposed
