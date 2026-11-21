@@ -23,6 +23,20 @@ import {
   WorkflowPrRequest,
   WorkflowPrResponse,
 } from './index';
+import {
+  BranchNodeSchema,
+  CompareQuery,
+  CompareResponse,
+  GetTreeQuery,
+  GetTreeResponse,
+  SetCompareWithBody,
+  SetCompareWithResponse,
+  SyncTreeResponse,
+  TREE_MAX_BRANCHES,
+  TREE_MAX_COMMITS,
+  TreeParams,
+  TreeSnapshotSchema,
+} from './index';
 
 const now = new Date().toISOString();
 
@@ -301,5 +315,176 @@ describe('ingest API', () => {
 
   it('response defaults duplicate to false', () => {
     expect(IngestResponse.parse({ reviewId: 'r' })).toEqual({ reviewId: 'r', duplicate: false });
+  });
+});
+
+describe('tree API', () => {
+  const sha = (n: number) => n.toString(16).padStart(40, '0');
+  const node = (over: Record<string, unknown> = {}) => ({
+    name: 'feature/login',
+    headSha: sha(3),
+    isDefault: false,
+    compareWith: 'dev',
+    why: 'pr',
+    whyPr: 2,
+    ambiguous: null,
+    loop: false,
+    ahead: 3,
+    behind: 1,
+    mergeBase: sha(2),
+    merged: null,
+    pr: { number: 2, state: 'open', baseRef: 'dev' },
+    ci: 'success',
+    recorded: false,
+    ...over,
+  });
+  const main = node({
+    name: 'main',
+    headSha: sha(1),
+    isDefault: true,
+    compareWith: null,
+    why: 'default',
+    whyPr: null,
+    ahead: 0,
+    behind: 0,
+    mergeBase: null,
+    pr: null,
+  });
+  const snapshot = (over: Record<string, unknown> = {}) => ({
+    defaultBranch: 'main',
+    branches: [main, node()],
+    commits: [
+      { sha: sha(1), parents: [], committedAt: now },
+      { sha: sha(2), parents: [sha(1)], committedAt: now },
+      { sha: sha(3), parents: [sha(2)], committedAt: now },
+    ],
+    truncated: false,
+    ...over,
+  });
+
+  it('parses a branch node and a snapshot', () => {
+    expect(BranchNodeSchema.parse(node()).compareWith).toBe('dev');
+    expect(
+      BranchNodeSchema.parse(
+        node({
+          merged: { via: 'pr', prNumber: 1, method: 'squash', into: 'main', newCommits: 0 },
+        }),
+      ).merged?.via,
+    ).toBe('pr');
+    expect(
+      BranchNodeSchema.parse(
+        node({
+          merged: { via: 'rebased', prNumber: null, method: null, into: 'main', newCommits: 0 },
+        }),
+      ).merged?.method,
+    ).toBeNull();
+    expect(TreeSnapshotSchema.parse(snapshot()).branches).toHaveLength(2);
+  });
+
+  it('rejects unknown why, ci, merged.via and bad SHAs', () => {
+    expect(BranchNodeSchema.safeParse(node({ why: 'manual' })).success).toBe(false);
+    expect(BranchNodeSchema.safeParse(node({ ci: 'error' })).success).toBe(false);
+    expect(
+      BranchNodeSchema.safeParse(
+        node({
+          merged: { via: 'cherry', prNumber: null, method: null, into: 'main', newCommits: 0 },
+        }),
+      ).success,
+    ).toBe(false);
+    expect(BranchNodeSchema.safeParse(node({ headSha: 'abc' })).success).toBe(false);
+    expect(BranchNodeSchema.safeParse(node({ headSha: sha(3).toUpperCase() + 'X' })).success).toBe(
+      false,
+    );
+    expect(BranchNodeSchema.safeParse(node({ headSha: 'a'.repeat(64) })).success).toBe(true);
+  });
+
+  it('carries no commit messages, emails or file names', () => {
+    const parsed = TreeSnapshotSchema.parse(
+      snapshot({
+        commits: [
+          { sha: sha(1), parents: [], committedAt: now, message: 'secret', author: 'a@b.c' },
+        ],
+        branches: [main],
+      }),
+    );
+    expect(parsed.commits[0]).toEqual({ sha: sha(1), parents: [], committedAt: now });
+  });
+
+  it('compareWith: required; null only on the default branch', () => {
+    const { compareWith: _omit, ...missing } = node();
+    expect(BranchNodeSchema.safeParse(missing).success).toBe(false);
+    expect(BranchNodeSchema.safeParse(node({ compareWith: null })).success).toBe(true);
+    expect(
+      TreeSnapshotSchema.safeParse(snapshot({ branches: [main, node({ compareWith: null })] }))
+        .success,
+    ).toBe(false);
+    expect(
+      TreeSnapshotSchema.safeParse(snapshot({ branches: [{ ...main, isDefault: false }] })).success,
+    ).toBe(false);
+  });
+
+  it('caps arrays and names', () => {
+    expect(BranchNodeSchema.safeParse(node({ name: 'x'.repeat(256) })).success).toBe(false);
+    expect(BranchNodeSchema.safeParse(node({ name: 'x'.repeat(255) })).success).toBe(true);
+    expect(BranchNodeSchema.safeParse(node({ name: '' })).success).toBe(false);
+    const branches = Array.from({ length: TREE_MAX_BRANCHES + 1 }, (_, i) =>
+      node({ name: `b${i}` }),
+    );
+    expect(TreeSnapshotSchema.safeParse(snapshot({ branches })).success).toBe(false);
+    const commits = Array.from({ length: TREE_MAX_COMMITS + 1 }, (_, i) => ({
+      sha: sha(i + 1),
+      parents: [],
+      committedAt: now,
+    }));
+    expect(TreeSnapshotSchema.safeParse(snapshot({ commits })).success).toBe(false);
+  });
+
+  it('parses GET /tree query + response', () => {
+    expect(TreeParams.parse({ repoId: 'r1' })).toEqual({ repoId: 'r1' });
+    expect(GetTreeQuery.parse({})).toEqual({});
+    expect(GetTreeQuery.parse({ at: now }).at).toBe(now);
+    expect(GetTreeQuery.safeParse({ at: 'yesterday' }).success).toBe(false);
+    expect(
+      GetTreeResponse.parse({
+        status: 'ready',
+        syncedAt: now,
+        errorCode: null,
+        snapshot: snapshot(),
+        canEdit: true,
+      }).status,
+    ).toBe('ready');
+    expect(
+      GetTreeResponse.parse({
+        status: 'failed',
+        syncedAt: null,
+        errorCode: 'github_error',
+        snapshot: null,
+        canEdit: false,
+      }).snapshot,
+    ).toBeNull();
+    expect(
+      GetTreeResponse.safeParse({
+        status: 'cloning',
+        syncedAt: null,
+        errorCode: null,
+        snapshot: null,
+        canEdit: false,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('parses sync, compare-with and compare', () => {
+    expect(SyncTreeResponse.parse({ queued: true })).toEqual({ queued: true });
+    expect(SyncTreeResponse.safeParse({ queued: false }).success).toBe(false);
+    expect(SetCompareWithBody.parse({ branch: 'a', compareWith: null }).compareWith).toBeNull();
+    expect(SetCompareWithBody.parse({ branch: 'a', compareWith: 'dev' }).compareWith).toBe('dev');
+    expect(SetCompareWithBody.safeParse({ branch: 'a' }).success).toBe(false);
+    expect(SetCompareWithResponse.parse({ branch: node() }).branch.name).toBe('feature/login');
+    expect(CompareQuery.parse({ a: 'main', b: 'dev' })).toEqual({ a: 'main', b: 'dev' });
+    expect(CompareQuery.safeParse({ a: 'main' }).success).toBe(false);
+    expect(CompareResponse.parse({ ahead: 1, behind: 0, mergeBase: sha(1) }).ahead).toBe(1);
+    expect(CompareResponse.safeParse({ ahead: -1, behind: 0, mergeBase: null }).success).toBe(
+      false,
+    );
   });
 });

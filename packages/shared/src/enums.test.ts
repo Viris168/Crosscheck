@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTION_PROVIDERS,
   Category,
+  CiState,
+  CompareWhy,
   ErrorCode,
   isActionProvider,
   JOB_PROVIDERS,
+  MergedVia,
   ProviderId,
   ReviewStatus,
   Severity,
+  TreeSyncStatus,
 } from './enums';
 
 describe('enums', () => {
@@ -41,5 +45,12 @@ describe('enums', () => {
     expect(isActionProvider('codex_action')).toBe(true);
     expect(isActionProvider('platform')).toBe(false);
     expect(isActionProvider('codex_chatgpt')).toBe(false);
+  });
+
+  it('match the branch tree contract values (mirrored in Prisma)', () => {
+    expect(TreeSyncStatus).toEqual(['idle', 'syncing', 'ready', 'failed']);
+    expect(CiState).toEqual(['success', 'failure', 'pending', 'neutral', 'none']);
+    expect(MergedVia).toEqual(['pr', 'rebased', 'squashed']);
+    expect(CompareWhy).toEqual(['override', 'pr', 'recorded', 'inferred', 'default']);
   });
 });
