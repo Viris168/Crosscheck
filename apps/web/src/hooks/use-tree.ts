@@ -3,18 +3,14 @@
 import {
   CompareResponse,
   SetCompareWithResponse,
+  GetTreeResponse,
   SyncTreeResponse,
+  TREE_MAX_VISIBLE,
   type BranchNode,
-  type GetTreeResponse,
 } from '@app/shared/client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import {
-  isComputed,
-  LazyGetTreeResponse,
-  MINE_PRS_HEADER,
-  TREE_MAX_VISIBLE,
-} from '@/components/tree/scale-contract';
+import { isComputed, MINE_PRS_HEADER } from '@/components/tree/scale-contract';
 import { ApiError, apiFetch } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 
@@ -84,7 +80,7 @@ export async function fetchTree(
     throw new ApiError(304, 'http_error', 'Unexpected 304 for an unconditional request');
   }
   if (!res.ok) throw await ApiError.from(res);
-  const body: GetTreeResponse = LazyGetTreeResponse.parse(await res.json());
+  const body: GetTreeResponse = GetTreeResponse.parse(await res.json());
   const live = res.headers.get(LIVE_EVENTS_HEADER);
   return {
     ...body,

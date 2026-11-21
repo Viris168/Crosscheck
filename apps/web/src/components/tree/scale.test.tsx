@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // T6b: the Branches tab at scale — virtualized rows, URL filters, collapse, on-demand compare.
-import type { TreeSnapshot } from '@app/shared/client';
+import { GetTreeResponse, type TreeSnapshot } from '@app/shared/client';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +8,7 @@ import { renderWithQuery } from '../../../test/render';
 import { scaleRepo, scaleSnapshot } from './__fixtures__/scale-repo';
 import { seedSnapshot } from './__fixtures__/seed-snapshot';
 import { BranchTree } from './branch-tree';
-import { LazyGetTreeResponse, MINE_PRS_HEADER, NOT_COMPUTED } from './scale-contract';
+import { MINE_PRS_HEADER, NOT_COMPUTED } from './scale-contract';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -21,7 +21,7 @@ beforeAll(() => {
 });
 
 const body = (snapshot: TreeSnapshot) =>
-  LazyGetTreeResponse.parse({
+  GetTreeResponse.parse({
     status: 'ready',
     syncedAt: '2026-11-20T10:00:00.000Z',
     errorCode: null,

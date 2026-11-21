@@ -11,8 +11,8 @@ import { CommitGraph } from '@app/git-graph';
 import { readCommitGraph } from '@app/git-graph/git';
 import { describe, expect, it } from 'vitest';
 import { scaleRepo, scaleSnapshot } from '@/components/tree/__fixtures__/scale-repo';
-import { LazyGetTreeResponse, LazyTreeSnapshotSchema } from '@/components/tree/scale-contract';
-import { buildSnapshot, compare } from './engine-t6a';
+import { GetTreeResponse, TreeSnapshotSchema } from '@app/shared';
+import { buildSnapshot, compare } from '@app/git-graph';
 
 const ms = (t: number) => `${(performance.now() - t).toFixed(1)} ms`;
 const time = <T>(label: string, fn: () => T, out: string[]): T => {
@@ -37,8 +37,8 @@ describe.runIf(process.env.TREE_SCALE_MEASURE === '1')('tree scale (server)', ()
     time(
       'GET /tree body: parse + zod (stored) + zod (response) + stringify',
       () => {
-        const parsed = LazyTreeSnapshotSchema.parse(JSON.parse(json));
-        const body = LazyGetTreeResponse.parse({
+        const parsed = TreeSnapshotSchema.parse(JSON.parse(json));
+        const body = GetTreeResponse.parse({
           status: 'ready',
           syncedAt: null,
           errorCode: null,

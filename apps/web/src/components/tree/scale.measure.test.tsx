@@ -10,7 +10,7 @@ import { renderWithQuery } from '../../../test/render';
 import { scaleRepo, scaleSnapshot } from './__fixtures__/scale-repo';
 import { BranchTree } from './branch-tree';
 import { layoutTree, squashShas, TreeGraph } from './layout';
-import { LazyGetTreeResponse } from './scale-contract';
+import { GetTreeResponse } from '@app/shared/client';
 import { EMPTY_VIEW, viewRows } from './view';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -30,7 +30,7 @@ describe.runIf(process.env.TREE_SCALE_MEASURE === '1')('tree scale (page)', () =
     });
 
     let t = performance.now();
-    LazyGetTreeResponse.parse(JSON.parse(json));
+    GetTreeResponse.parse(JSON.parse(json));
     out.push(`client: JSON.parse + zod of ${(json.length / 1e6).toFixed(2)} MB: ${ms(t)}`);
 
     t = performance.now();
