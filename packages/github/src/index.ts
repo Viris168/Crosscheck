@@ -31,3 +31,21 @@ export {
   type GithubUserProfile,
   type RepoPermission,
 } from './permissions';
+export {
+  ciBucket,
+  combineCi,
+  fetchCiState,
+  gitAuthForInstallation,
+  listBranches,
+  listPullRequestsForTree,
+  resetTreeWarningsForTesting,
+  type CiBucket,
+  type FetchCiStateOptions,
+  type GitAuth,
+  type GitAuthOptions,
+  type GitAuthRepo,
+  type ListPullRequestsForTreeOptions,
+  type TreeBranch,
+  type TreePr,
+  type TreeWarn,
+} from './tree';
