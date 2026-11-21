@@ -10,11 +10,12 @@ webhooks. It never calls GitHub's compare API: the graph comes from a commits-on
 
 Page: `/repos/[repoId]/tree`, a **Branches** tab in `RepoHeader` (between Pull requests and Settings).
 
-> **Source of truth for behavior:** the prototype ("this demo"). Before wave 1, save it as
-> `docs/branch-tree/prototype.html` (or link it here). Where this spec and the prototype disagree on UI
-> behavior, the prototype wins; on privacy and security, this spec wins. The compare-with rule order below is
-> reconstructed from the plan; **T1 checks it against the prototype and writes any difference into this file
-> as its first commit.**
+> **Source of truth for behavior:** the prototype, `docs/branch-tree/prototype.html` (open it in a browser).
+> The compare-with and merged-state rules below are transcribed from its code (`chooseBase`, `inferBase`,
+> `compareMap`, `prMerge`, `equivalence`, `contentMerged`); the function names are given so you can check.
+> Where this spec and the prototype disagree on behavior, the prototype wins; on privacy and security, this
+> spec wins. Demo-only parts are **not** built: the "Show real parents" toggle (`createdFrom`), committing,
+> branching, opening/merging PRs and running CI from the page, and the "Acting as" picker.
 
 ## Milestones → agents
 | # | Milestone | Done when | Agents |
@@ -66,7 +67,7 @@ Page: `/repos/[repoId]/tree`, a **Branches** tab in `RepoHeader` (between Pull r
 ```prisma
 enum TreeSyncStatus { idle syncing ready failed }
 enum CiState { success failure pending neutral none }
-enum MergedVia { pr ancestor patch_id content }
+enum MergedVia { pr rebased squashed }
 
 model RepoGraph {               // one per repo; status of the clone + last snapshot
   repoId        String  @id
@@ -87,8 +88,8 @@ model Branch {
   name               String
   headSha            String
   isDefault          Boolean  @default(false)
-  /// milestone 5: parent seen when the branch was created (push event, created=true)
-  recordedParent     String?
+  /// milestone 5: branches whose head was this branch's first commit when the push webhook saw it created
+  recordedParents    String[] @default([])
   recordedAt         DateTime?
   deletedAt          DateTime?
   createdAt          DateTime @default(now())
@@ -155,45 +156,59 @@ BranchNode = {
   name, headSha, isDefault,
   compareWith: string | null,            // null only for the default branch
   why: CompareWhy,                        // see "Compare-with rules"
+  whyPr: number | null,                   // rule 'pr'
+  ambiguous: number | null,               // rule 'recorded' with several candidates
+  loop: boolean,                          // fell back to default because of a loop
   ahead: number, behind: number, mergeBase: string | null,
-  merged: { via: MergedVia, prNumber: number | null, into: string, newCommits: number } | null,
+  merged: { via: MergedVia, prNumber: number | null, method: 'merge' | 'squash' | 'rebase' | null,
+            into: string, newCommits: number } | null,
   pr: { number, state, baseRef } | null,  // newest PR whose head.ref is this branch
   ci: CiState,
   recorded: boolean,                      // milestone 5
 }
-CompareWhy = 'override' | 'open_pr' | 'merged_pr' | 'recorded' | 'nearest' | 'same_commit' | 'default'
+CompareWhy = 'override' | 'pr' | 'recorded' | 'inferred' | 'default'
 ```
 
 ---
 
-## Compare-with rules (milestone 1 engine; milestone 4 adds overrides; check against the prototype)
-For each non-default branch `B`, the first rule that matches wins:
-1. **`override`**: a `CompareOverride` row exists and its target branch still exists.
-2. **`open_pr`**: the newest open PR with `head.ref = B` → its `base.ref`.
-3. **`merged_pr`**: the newest merged PR with `head.ref = B` → its `base.ref`.
-4. **`recorded`**: `Branch.recordedParent` is set and still exists (milestone 5).
-5. **`nearest`**: candidates are the other branches `C`, excluding any `C` whose head equals `B`'s head and
-   any `C` built on top of `B` (`B`'s head is an ancestor of `C`'s head). Pick the `C` with the smallest
-   `rev-list --count C..B` (commits `B` has that `C` lacks). Ties: default branch, then the `C` that `B` is
-   least behind, then name order. This makes `feat-2` (stacked on `feat-1`) point at `feat-1`, and keeps
-   `feat-1` from pointing at its own child `feat-2`.
-6. **`same_commit`**: `B`'s head equals another branch's head and no rule above matched → compare with the
-   default branch, label "same commit as X".
-7. **`default`**: the default branch.
+## Compare-with rules (prototype `chooseBase` + `inferBase` + `compareMap`)
+`LONG_LIVED = /^(main|master|dev|develop|staging|release\/.+)$/`; a branch is long-lived if it matches or is the
+default branch. For each non-default branch `B`, the first rule that matches wins (a target must exist and ≠ `B`):
+1. **`override`** — a `CompareOverride` row for `B` whose target still exists. Label "set by hand".
+2. **`pr`** — PRs with `head.ref = B` whose base still exists: the newest **open** one, else the newest
+   **merged** one → its `base.ref`. Label "PR #n"; long form "Target of PR #n (open|merged)".
+3. **`recorded`** — `Branch.recordedParents` (every branch whose head was `B`'s starting commit when the push
+   webhook saw `B` created; T5b), filtered to existing branches. One → it. Several → the `closest` of them
+   (below), with `ambiguous = count`; label "ambiguous".
+4. **`inferred`** — candidates: every other branch `C` that is long-lived, **or** whose head ≠ `B`'s head and is
+   contained in `B` (`B` was cut from `C` and `C` has not moved since). Pick the `closest`. Label "guess".
+5. **`default`** — the default branch. Label "default".
 
-Never pick a target that would create a cycle (`B → C → B`); skip it and keep going.
+`closest(B, candidates)`: the lowest score tuple, compared left to right:
+`[ahead(B vs C), C is default ? 0 : 1, C is long-lived ? 0 : 1, behind(B vs C), C's name]`.
 
-## Merged-state rules (milestone 3)
-For each branch `B` with compare-with target `T`, the first that matches wins:
-1. **`pr`** — a merged PR with `head.ref = B`. If `B`'s head is still the PR's `head.sha`, `newCommits = 0`;
-   if `B` moved on, `newCommits = rev-list --count <pr.headSha>..B` ("merged via #n, then 3 new commits").
-   Works for merge commit, squash and rebase because it never looks at content.
-2. **`ancestor`** — `B`'s head is an ancestor of `T` (fast-forward or merge without a PR). Graph only.
-3. **`patch_id`** — every commit in `T..B` has a patch-id equal to a commit in `B..T` (`git cherry T B` shows
-   only `-`). Rebase without a PR. Needs contents → throwaway workspace.
-4. **`content`** — `git merge-tree --write-tree T B` yields `T`'s tree. Squash without a PR. Throwaway
-   workspace.
-Rules 3–4 run only for branches not matched by 1–2, at most 50 branches per sync, each with a 10 s timeout.
+**Loops** (`compareMap`): after choosing for every branch, walk each branch's chain in name order; if it comes
+back to itself, that branch gets `{ compareWith: default, why: 'default', loop: true }` ("The choices formed a
+loop, so the default branch.").
+
+## Merged-state rules (prototype `prMerge` + `contentMerged`; milestone 3)
+For each non-default branch `B` with compare-with target `T`:
+1. **PR record** (`prMerge`) — the newest merged PR with `head.ref = B`. `newCommits` = commits reachable from
+   `B` but not from the PR's head SHA at merge time (`rev-list --count <pr.headSha>..B`). `newCommits = 0` →
+   "merged via #n (merge commit|squash|rebase)"; `> 0` → "N new since #n" (warning colour). Merge method comes
+   from the PR (see T2b: merge commit = 2 parents; squash/rebase told apart by comparing the PR's commit count
+   with what landed — VERIFY in T2b). Content is never read.
+2. **Content** (`equivalence` + `contentMerged`), only when there is no merged PR: take the commits in `T..B`
+   (`ahead`). If `ahead` is empty → not marked (the row already shows ↑0). For each ahead commit: a merge
+   commit counts as done; a commit whose patch-id matches a commit in `T` counts as `patch`; otherwise it counts
+   as `content` if its change is already in `T`. All done and none `content` → **`rebased`**; all done with
+   some `content` → **`squashed`**; any not done → not merged. Label "content in T (rebased|squashed)".
+   Real-git mapping: patch matches = `git cherry T B` (`-` lines). For the rest, "change already in T" =
+   `git merge-tree --write-tree T B` gives `T`'s own tree (checked once for the whole branch, not per commit).
+   Both need contents → throwaway workspace. At most 50 branches per sync, 10 s each.
+
+`MergedVia = 'pr' | 'rebased' | 'squashed'`. The compare panel's per-commit tags ("same patch as X",
+"in squash Y") are out of scope until T6b (they need contents per request).
 
 **VERIFY (T2b):** what `merge_commit_sha` is after a rebase merge (expected: the last rebased commit on the
 base). Rule 1 does not depend on it; it is stored for the UI link only.

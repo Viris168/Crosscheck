@@ -21,10 +21,15 @@ until it exists, call `inngest.send({ name: 'tree/sync-requested', ... })` direc
 4. **Page** `tree/page.tsx`: `loadRepoForPage` + `<RepoHeader active="tree" />` + a client `<BranchTree>`.
    - `useTree(repoId)`: TanStack Query; poll every 3 s while `status === 'syncing'`, else no polling (T5c
      changes this).
-   - Render: one row per branch, drawn as a tree by `compareWith` (default branch at the root). Each row:
-     name, `ahead ↑ / behind ↓` vs its compare-with, PR chip (`#n open/merged`), CI dot, "merged via #n" when
-     `merged` is set, "same commit as X" label. A small commit lane graph from `snapshot.commits` (port the
-     prototype's drawing).
+   - Port the prototype's layout and drawing (`renderTree`, `renderDetails` for repo/branch/commit):
+     repo node → branch boxes ordered by `branchOrder` (children under their compare-with) → each branch's own
+     commits (last 7, older ones as a `+N` chip). Branch box: name, `↑a ↓b vs X · why`, the merged line,
+     CI dot for the open PR. Commit shapes: merge (filled), squash (square), head (double ring). Details
+     aside on click/Enter. Same colour tokens, mapped onto our Tailwind theme (light + dark).
+   - **Read-only:** no commit / branch / open PR / merge / CI buttons, no "Acting as", no "Show real
+     parents". Commit messages and authors are not stored, so commit details show the SHA, parents and
+     branches, with a "View on GitHub" link instead of the message.
+   - The ahead/behind matrix and the compare panel come later (T6b).
    - States: syncing (skeleton + "Cloning commits…"), failed (error + "Try again" → POST sync), empty
      (only the default branch), `truncated` banner.
    - A "Refresh" button → POST sync.

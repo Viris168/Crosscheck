@@ -17,18 +17,18 @@
    - CI-only events skip the fetch.
    - Rebuild the snapshot (reuse T2c/T3b steps; merged-state cache keeps it cheap).
    - Target: tree updated within **5 s** of the webhook for a normal push.
-2. **Recorded parent**: on `branch_created` with `after = X`, the parent is the existing branch whose head
-   was `X` at that moment (from `Branch` rows before this event). Several match → the default branch if it is
-   one of them, else the most recently updated. None match (new commits pushed with the branch) → the branch
-   whose head is the nearest ancestor of `X`. Store `recordedParent`, `recordedAt`. Never overwrite it later.
+2. **Recorded parents** (prototype `actions.branch`): on `branch_created` with `after = X`, store every
+   existing branch whose head was `X` at that moment (from `Branch` rows before this event) in
+   `recordedParents`, plus `recordedAt`. Zero matches (new commits pushed with the branch) → empty list (the
+   engine then infers). Choosing among several is the engine's job (`ambiguous`). Never overwrite it later.
 3. **Cron fallback** `tree-cron` every 15 min: send `tree/sync-requested` (`cron`) for repos whose
    `RepoGraph.syncedAt` is older than 15 min and were viewed in the last 7 days (track views in Redis from T5c's
    GET, or `RepoGraph.updatedAt`; pick one and say which).
 4. Full sync stays the fallback for a `force_push` on the default branch.
 
 ## Tests
-Push → only that branch refetched; delete → ref removed; create from `feat-a` → `recordedParent = feat-a`;
-two branches at one commit → tie rule; 10 events in 1 s → one refresh; cron picks only stale viewed repos.
+Push → only that branch refetched; delete → ref removed; create from `feat-a` → `recordedParents = [feat-a]`;
+two branches at one commit → both recorded; 10 events in 1 s → one refresh; cron picks only stale viewed repos.
 
 ## Not yours
 Webhook parsing (T5a), the UI (T5c).
