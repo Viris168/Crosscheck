@@ -36,7 +36,7 @@ until it exists, call `inngest.send({ name: 'tree/sync-requested', ... })` direc
 5. Keyboard: rows are focusable; Enter on a row with a PR opens `/repos/:id/pulls/:n`.
 
 ## Tests
-- Route tests: 401 no session, 404 not a collaborator, first view sends the event once, 429 rate limit,
+- Route tests: 401 no session, 403 not a collaborator (`requireRepoAccess`, as in Task H), first view sends the event once, 429 rate limit,
   response validates against `GetTreeResponse`.
 - Component tests with the seed snapshot: stacked branch nests under its parent; merged and same-commit
   labels render; failed state shows retry.
