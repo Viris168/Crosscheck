@@ -10,7 +10,7 @@ import {
   listPullRequestsForTree,
   splitFullName,
 } from '@app/github';
-import { CommitGraph, prMerge } from '@app/git-graph';
+import { detectMergedWithFallbacks } from '@app/git-graph/git';
 import { getProvider } from '@app/providers';
 import type { ProviderId, ReviewFile, ReviewIssue, ReviewProvider, RiskResult } from '@app/shared';
 import * as comments from '@app/github-comments';
@@ -185,7 +185,7 @@ export function realTreeSyncDeps(): TreeSyncDeps {
         lock,
         repo.githubRepoId,
         () =>
-          detectMergedWithFallbacks(cloneDir(cacheDir, repo.githubRepoId), auth, input, {
+          detectMerged(cloneDir(cacheDir, repo.githubRepoId), auth, input, {
             maxBranches: MERGED_MAX_BRANCHES,
             perBranchTimeoutMs: MERGED_BRANCH_TIMEOUT_MS,
           }),
@@ -206,20 +206,33 @@ const MERGED_BRANCH_TIMEOUT_MS = 10_000;
 const MERGED_LOCK_TTL_MS = 15 * 60_000;
 
 /**
- * MOCK(T3a): stands in for `detectMergedWithFallbacks` from `@app/git-graph/git` until T3a merges
- * (signature in tasks/T3a-merged-detection.md). Applies rule 1 (PR record) only and leaves every other
- * branch out of the result ("not checked"), so nothing is cached as `none` that the real content rule
- * (rule 2) could later mark merged. Swap: import the real one and adapt its result to `MergedOutcome`.
- * VERIFY(T3a): the real `graphInput` shape and return type; adapt here, not in tree-sync.ts.
+ * T3a's `detectMergedWithFallbacks`, content-checking only `input.check` (the branches the Redis cache has
+ * no answer for). Returns, per checked branch, how it merged or null (checked, not merged). A branch left
+ * out (over the cap, timed out, failed) was not checked and is tried again next sync.
  */
-async function detectMergedWithFallbacks(
-  _cacheGitDir: string,
-  _auth: GitAuth,
+async function detectMerged(
+  cacheGitDir: string,
+  auth: GitAuth,
   input: MergedDetectInput,
-  _opts: { maxBranches: number; perBranchTimeoutMs: number },
+  opts: { maxBranches: number; perBranchTimeoutMs: number },
 ): Promise<Map<string, MergedOutcome>> {
-  const graph = new CommitGraph(input.graph);
+  const res = await detectMergedWithFallbacks(
+    cacheGitDir,
+    auth,
+    {
+      defaultBranch: input.defaultBranch,
+      branches: input.branches,
+      graph: input.graph,
+      prs: input.prs,
+      overrides: input.overrides,
+    },
+    { ...opts, only: input.check.map((b) => b.name) },
+  );
   const out = new Map<string, MergedOutcome>();
-  for (const b of input.branches) if (prMerge(graph, b, input.prs)) out.set(b.name, 'pr');
+  for (const b of input.check) {
+    if (!res.content.has(b.name)) continue;
+    const m = res.merged.get(b.name);
+    out.set(b.name, m && m.via !== 'pr' ? m.via : null);
+  }
   return out;
 }

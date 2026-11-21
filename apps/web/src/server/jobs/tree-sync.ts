@@ -8,7 +8,9 @@ import {
   buildSnapshot,
   pickCompareWith,
   prMerge,
+  type BranchInput,
   type CommitInput,
+  type Lookup,
   type PrRecord,
 } from '@app/git-graph';
 import {
@@ -140,9 +142,13 @@ export interface MergedDetectBranch {
 
 export interface MergedDetectInput {
   defaultBranch: string;
-  branches: MergedDetectBranch[];
+  /** every live branch: the detector picks compare-with targets from all of them */
+  branches: readonly BranchInput[];
   graph: readonly CommitInput[];
   prs: readonly PrRecord[];
+  overrides: Lookup;
+  /** the branches to content-check (no cache answer yet) */
+  check: readonly MergedDetectBranch[];
 }
 
 /** Per branch name: how it merged, or null = checked and not merged. A branch left out was not checked. */
@@ -355,9 +361,11 @@ export async function treeSyncHandler(
             const auth = await github.gitAuth(repo); // fresh token: the workspace fetches contents
             const found = await merged.detect(repo, auth, {
               defaultBranch: def.name,
-              branches: todo,
+              branches,
               graph: graph.commits,
               prs,
+              overrides,
+              check: todo,
             });
             for (const b of todo) {
               const r = found.get(b.name);
@@ -489,7 +497,14 @@ export function applyContentMerged(
     if (!targetSha) continue;
     const via = cached.get(mergedCacheField(b.name, b.headSha, targetSha));
     if (via === 'rebased' || via === 'squashed')
-      b.merged = { via, prNumber: null, method: null, into: b.compareWith, newCommits: 0 };
+      b.merged = {
+        via,
+        prNumber: null,
+        method: null,
+        into: b.compareWith,
+        newCommits: 0,
+        mergeCommitSha: null,
+      };
   }
 }
 
@@ -733,10 +748,17 @@ export const prismaTreeStore: TreeStore = {
   async prRecords(repoId) {
     const rows = await prisma.pullRequest.findMany({
       where: { repoId },
-      select: { number: true, headRef: true, baseRef: true, state: true, headSha: true },
+      select: {
+        number: true,
+        headRef: true,
+        baseRef: true,
+        state: true,
+        headSha: true,
+        mergeCommitSha: true,
+      },
     });
-    // VERIFY(T3a): merge method is not stored yet; the PR rule works without it.
-    return rows.map((r) => ({ ...r, mergeMethod: null }));
+    // No mergeMethod: GitHub's PR API doesn't give it; `detectMerged` infers it from the graph.
+    return rows;
   },
 
   async overrides(repoId) {

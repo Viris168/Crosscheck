@@ -488,7 +488,7 @@ describe('tree-sync against a local fixture repo', () => {
       });
       expect([...runner.calls.keys()]).toEqual(['load-refs', 'fetch', 'ci', 'merged', 'snapshot']);
       expect(fm.state.detectCalls).toHaveLength(1);
-      expect(fm.state.detectCalls[0]!.branches.map((b) => [b.name, b.compareWith]).sort()).toEqual([
+      expect(fm.state.detectCalls[0]!.check.map((b) => [b.name, b.compareWith]).sort()).toEqual([
         ['feature/login', 'main'],
         ['fix/rebased', 'main'],
         ['fix/squashed', 'main'],
@@ -537,7 +537,7 @@ describe('tree-sync against a local fixture repo', () => {
       repo.checkout('main');
       fm.state.answer.set('fix/squashed', null);
       await treeSyncHandler({ event, step: createFakeRunner().step }, deps);
-      expect(fm.state.detectCalls.map((c) => c.branches.map((b) => b.name))).toEqual([
+      expect(fm.state.detectCalls.map((c) => c.check.map((b) => b.name))).toEqual([
         ['fix/squashed'],
       ]);
       expect(snapBranch('fix/squashed').merged).toBeNull();
@@ -557,7 +557,7 @@ describe('tree-sync against a local fixture repo', () => {
       ];
       const runner = createFakeRunner();
       await treeSyncHandler({ event, step: runner.step }, deps);
-      expect(fm.state.detectCalls[0]!.branches.map((b) => b.name)).not.toContain('fix/squashed');
+      expect(fm.state.detectCalls[0]!.check.map((b) => b.name)).not.toContain('fix/squashed');
       expect(runner.outputs.get('merged')).toMatchObject({ byVia: { pr: 1, squashed: 0 } });
       expect(snapBranch('fix/squashed').merged).toMatchObject({ via: 'pr', prNumber: 7 });
     });
@@ -606,7 +606,7 @@ describe('tree-sync against a local fixture repo', () => {
       expect([...fm.state.hash.values()].sort()).toEqual(['none', 'squashed']);
       fm.state.detectCalls = [];
       await treeSyncHandler({ event, step: createFakeRunner().step }, deps);
-      expect(fm.state.detectCalls.map((c) => c.branches.map((b) => b.name))).toEqual([
+      expect(fm.state.detectCalls.map((c) => c.check.map((b) => b.name))).toEqual([
         ['fix/rebased'],
       ]);
     });
@@ -766,6 +766,7 @@ describe('applyContentMerged', () => {
       method: null;
       into: string;
       newCommits: number;
+      mergeCommitSha: string | null;
     },
     pr: null,
     ci: 'none' as const,
@@ -780,7 +781,14 @@ describe('applyContentMerged', () => {
       ['b', 'b1'],
       ['c', 'c1'],
     ]);
-    const prMerged = { via: 'pr' as const, prNumber: 3, method: null, into: 'main', newCommits: 0 };
+    const prMerged = {
+      via: 'pr' as const,
+      prNumber: 3,
+      method: null,
+      into: 'main',
+      newCommits: 0,
+      mergeCommitSha: null,
+    };
     const branches = [
       node('main', 'm1', { isDefault: true, compareWith: null }),
       node('a', 'a1'),
