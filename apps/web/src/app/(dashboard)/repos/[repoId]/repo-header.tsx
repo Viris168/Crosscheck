@@ -20,7 +20,7 @@ export function RepoHeader({
   active,
 }: {
   repo: { id: string; fullName: string };
-  active: 'pulls' | 'settings' | 'setup';
+  active: 'pulls' | 'tree' | 'settings' | 'setup';
 }) {
   const base = `/repos/${repo.id}`;
   return (
@@ -30,6 +30,7 @@ export function RepoHeader({
         label="Repository sections"
         tabs={[
           { href: `${base}/pulls`, label: 'Pull requests', active: active === 'pulls' },
+          { href: `${base}/tree`, label: 'Branches', active: active === 'tree' },
           { href: `${base}/settings`, label: 'Settings', active: active === 'settings' },
           { href: `${base}/setup`, label: 'Setup', active: active === 'setup' },
         ]}
