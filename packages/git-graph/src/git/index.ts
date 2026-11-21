@@ -14,3 +14,20 @@ export {
   treeId,
   type ReadCommitGraphOptions,
 } from './read';
+export {
+  withContentWorkspace,
+  sweepStaleWorkspaces,
+  WorkspaceTimeoutError,
+  WORKSPACE_PREFIX,
+  type ContentWorkspace,
+  type GitAuth,
+  type WorkspaceOptions,
+  type CallOptions,
+} from './workspace';
+export {
+  detectMergedWithFallbacks,
+  type MergedGraphInput,
+  type DetectMergedOptions,
+  type DetectMergedResult,
+} from './detect-merged';
+export { assertNoContents, objectCounts } from './assert-no-contents';
