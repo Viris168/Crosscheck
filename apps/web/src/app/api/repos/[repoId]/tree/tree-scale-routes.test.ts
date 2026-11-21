@@ -1,16 +1,18 @@
 // T6b: GET /tree/compare (auth + Redis cache by head SHAs), GET /tree?visible= (lazy counts), the
 // "mine" header, and the T6a engine mock.
 import { CommitGraph } from '@app/git-graph';
-import { ApiErrorSchema, CompareResponse, HttpError, type MemberRole } from '@app/shared';
+import {
+  ApiErrorSchema,
+  CompareResponse,
+  GetTreeResponse,
+  HttpError,
+  type MemberRole,
+} from '@app/shared';
 import type * as GithubModule from '@app/github';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedBranches, seedSnapshot, SEED_SHA } from '@/components/tree/__fixtures__/seed-snapshot';
 import { scaleRepo, scaleSnapshot } from '@/components/tree/__fixtures__/scale-repo';
-import {
-  LazyGetTreeResponse,
-  MINE_PRS_HEADER,
-  NOT_COMPUTED,
-} from '@/components/tree/scale-contract';
+import { MINE_PRS_HEADER, NOT_COMPUTED } from '@/components/tree/scale-contract';
 
 // ---------------------------------------------------------------- mocks
 
@@ -81,7 +83,7 @@ vi.mock('./graph-source', () => graphs);
 
 const { GET: getCompare, COMPARE_CACHE_SECONDS, compareCacheKey } = await import('./compare/route');
 const { GET: getTree } = await import('./route');
-const { buildSnapshot, compare } = await import('./engine-t6a');
+const { buildSnapshot, compare } = await import('@app/git-graph');
 
 // ---------------------------------------------------------------- fixtures
 
@@ -238,17 +240,17 @@ describe('GET /api/repos/:repoId/tree?visible=', () => {
     const res = await tree('?visible=dev&visible=feature%2Flogin');
     expect(res.status).toBe(200);
     expect(graphs.loadCommitGraph).not.toHaveBeenCalled();
-    const body = LazyGetTreeResponse.parse(await res.json());
+    const body = GetTreeResponse.parse(await res.json());
     expect(body.snapshot?.branches.find((b) => b.name === 'dev')?.ahead).toBe(2);
   });
 
   it('a lazy snapshot is served as is; visible rows and their chains get counts', async () => {
     db.repoGraph.findUnique.mockResolvedValue(stored(lazySeed()));
-    const plain = LazyGetTreeResponse.parse(await (await tree()).json());
+    const plain = GetTreeResponse.parse(await (await tree()).json());
     expect(plain.snapshot?.branches.filter((b) => b.ahead === NOT_COMPUTED)).toHaveLength(5);
 
     const res = await tree('?visible=feature%2Flogin');
-    const body = LazyGetTreeResponse.parse(await res.json());
+    const body = GetTreeResponse.parse(await res.json());
     const by = new Map(body.snapshot!.branches.map((b) => [b.name, b]));
     const full = new Map(seedSnapshot().branches.map((b) => [b.name, b]));
     for (const name of ['feature/login', 'dev'])
@@ -283,7 +285,7 @@ describe('GET /api/repos/:repoId/tree?visible=', () => {
     graphs.loadCommitGraph.mockResolvedValue(null);
     const res = await tree('?visible=dev');
     expect(res.status).toBe(200);
-    const body = LazyGetTreeResponse.parse(await res.json());
+    const body = GetTreeResponse.parse(await res.json());
     expect(body.snapshot!.branches.find((b) => b.name === 'dev')!.ahead).toBe(NOT_COMPUTED);
   });
 

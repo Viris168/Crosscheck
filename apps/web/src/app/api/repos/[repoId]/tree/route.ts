@@ -1,18 +1,19 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '@app/db';
-import { TreeParams, TREE_MAX_COMMITS, type TreeSnapshot } from '@app/shared';
 import {
-  GetTreeScaleQuery,
-  isComputed,
-  LazyGetTreeResponse,
-  LazyTreeSnapshotSchema,
-  MINE_PRS_HEADER,
-} from '@/components/tree/scale-contract';
+  GetTreeQuery,
+  GetTreeResponse,
+  TreeParams,
+  TREE_MAX_COMMITS,
+  TreeSnapshotSchema,
+  type TreeSnapshot,
+} from '@app/shared';
+import { isComputed, MINE_PRS_HEADER } from '@/components/tree/scale-contract';
 import { canEditRepo, requireRepoAccess } from '@/lib/server/access';
 import { json, queryOf, route } from '@/lib/server/http';
 import { requireSession } from '@/server/auth';
 import { logger } from '@/server/logger';
-import { buildSnapshot } from './engine-t6a';
+import { buildSnapshot } from '@app/git-graph';
 import { etagMatches, LIVE_EVENTS_HEADER, treeEtag } from './etag';
 import { loadCommitGraph } from './graph-source';
 import { loadOverrides, withOverrides } from './overrides';
@@ -118,7 +119,7 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
   const { repoId } = TreeParams.parse(params);
   const visibleParam = new URL(req.url).searchParams.getAll('visible');
   // `at` is milestone 8; validated, not used yet.
-  const { visible } = GetTreeScaleQuery.parse({
+  const { visible } = GetTreeQuery.parse({
     ...queryOf(req),
     visible: visibleParam.length ? visibleParam : undefined,
   });
@@ -137,7 +138,7 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
       await requestInSlot(key, () => requestTreeSync(repoId, repo.orgId, 'first_view'));
     }
     return json(
-      LazyGetTreeResponse,
+      GetTreeResponse,
       {
         status: 'syncing',
         syncedAt: null,
@@ -174,7 +175,7 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
   }
 
   // The snapshot is JSON written by the sync job; a shape we can't read is shown as a failed sync.
-  const parsed = graph.snapshot == null ? null : LazyTreeSnapshotSchema.safeParse(graph.snapshot);
+  const parsed = graph.snapshot == null ? null : TreeSnapshotSchema.safeParse(graph.snapshot);
   if (parsed && !parsed.success) {
     logger.error({ repoId, issues: parsed.error.issues.length }, 'stored tree snapshot is invalid');
   }
@@ -187,7 +188,7 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
     : [];
 
   return json(
-    LazyGetTreeResponse,
+    GetTreeResponse,
     {
       status: unreadable && graph.status !== 'syncing' ? 'failed' : graph.status,
       syncedAt: graph.syncedAt?.toISOString() ?? null,

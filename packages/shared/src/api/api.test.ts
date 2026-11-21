@@ -34,6 +34,7 @@ import {
   SyncTreeResponse,
   TREE_MAX_BRANCHES,
   TREE_MAX_COMMITS,
+  TREE_MAX_VISIBLE,
   TreeParams,
   TreeSnapshotSchema,
 } from './index';
@@ -379,6 +380,21 @@ describe('tree API', () => {
       ).merged?.method,
     ).toBeNull();
     expect(TreeSnapshotSchema.parse(snapshot()).branches).toHaveLength(2);
+  });
+
+  it('allows -1 (not computed) for ahead/behind, nothing lower', () => {
+    expect(BranchNodeSchema.parse(node({ ahead: -1, behind: -1, mergeBase: null })).ahead).toBe(-1);
+    expect(BranchNodeSchema.safeParse(node({ ahead: -2 })).success).toBe(false);
+  });
+
+  it('GET /tree query: visible is optional and capped', () => {
+    expect(GetTreeQuery.parse({}).visible).toBeUndefined();
+    expect(GetTreeQuery.parse({ visible: ['main', 'dev'] }).visible).toEqual(['main', 'dev']);
+    expect(
+      GetTreeQuery.safeParse({
+        visible: Array.from({ length: TREE_MAX_VISIBLE + 1 }, (_, i) => `b${i}`),
+      }).success,
+    ).toBe(false);
   });
 
   it('defaults merged.mergeCommitSha to null and accepts a full SHA', () => {

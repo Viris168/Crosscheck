@@ -5,7 +5,7 @@ import { json, queryOf, route } from '@/lib/server/http';
 import { requireSession } from '@/server/auth';
 import { logger } from '@/server/logger';
 import { getRedis } from '@/server/redis';
-import { compare } from '../engine-t6a';
+import { compare } from '@app/git-graph';
 import { loadCommitGraph } from '../graph-source';
 
 export const dynamic = 'force-dynamic';

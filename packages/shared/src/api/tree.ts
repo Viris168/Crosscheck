@@ -61,8 +61,9 @@ export const BranchNodeSchema = z.object({
   ambiguous: z.number().int().min(2).nullable(),
   /** Fell back to the default branch because the choices formed a loop. */
   loop: z.boolean(),
-  ahead: z.number().int().nonnegative(),
-  behind: z.number().int().nonnegative(),
+  /** -1 = not computed (lazy table, `buildSnapshot({ visible })`); `mergeBase` is then null. */
+  ahead: z.number().int().min(-1),
+  behind: z.number().int().min(-1),
   mergeBase: Sha.nullable(),
   merged: BranchMergedSchema.nullable(),
   /** Newest PR whose head.ref is this branch. */
@@ -108,8 +109,13 @@ export const TreeSnapshotSchema = z
 export type TreeSnapshot = z.infer<typeof TreeSnapshotSchema>;
 
 /** GET /api/repos/:repoId/tree?at=<ISO> (`at`: milestone 8 only). */
+/** Most branch names GET /tree computes per request (the rows on screen). */
+export const TREE_MAX_VISIBLE = 200;
+
 export const GetTreeQuery = z.object({
   at: IsoDate.optional(),
+  /** branches on screen, sent as `?visible=a&visible=b`: only these rows (and their chains) are computed */
+  visible: z.array(BranchName).max(TREE_MAX_VISIBLE).optional(),
 });
 
 export const GetTreeResponse = z.object({
