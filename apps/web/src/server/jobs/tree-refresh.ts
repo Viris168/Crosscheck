@@ -226,6 +226,7 @@ export async function treeRefreshHandler(
     const snap = await rebuildSnapshotSteps(step, sync, repoId, {
       only: out.ciShas,
       force: out.ciForce,
+      snapshotFirst: true,
     });
     await advance(range);
     if (out.more) {

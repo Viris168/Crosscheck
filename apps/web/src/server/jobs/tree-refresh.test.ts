@@ -377,6 +377,7 @@ describe('tree-refresh against a local fixture repo', () => {
     expect([...runner.calls.keys()]).toEqual([
       'apply-events',
       'fetch-refs',
+      'snapshot-early', // the push shows before the CI reads and the content check
       'ci',
       'merged',
       'snapshot',
