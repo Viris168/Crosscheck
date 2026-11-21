@@ -1,0 +1,25 @@
+{
+  "ref": "refs/heads/feat/login",
+  "before": "dddddddddddddddddddddddddddddddddddddddd",
+  "after": "0000000000000000000000000000000000000000",
+  "created": false,
+  "deleted": true,
+  "forced": false,
+  "base_ref": null,
+  "compare": "https://github.com/Acme/web/compare/x",
+  "commits": [],
+  "head_commit": null,
+  "repository": {
+    "id": 2001,
+    "full_name": "Acme/web",
+    "private": true
+  },
+  "installation": {
+    "id": 1001
+  },
+  "sender": {
+    "login": "bob",
+    "id": 7002,
+    "type": "User"
+  }
+}

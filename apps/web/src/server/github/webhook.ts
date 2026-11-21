@@ -14,15 +14,28 @@ import {
   handlePullRequest,
   type HandlerResult,
 } from './handlers';
+import {
+  handleCheckRun,
+  handleCheckSuite,
+  handlePush,
+  handleStatus,
+  withTreeEvent,
+  type WebhookContext,
+} from './tree-events';
 
 /** Deliveries we've seen are remembered this long (GitHub redelivers within hours). */
 export const DELIVERY_TTL_SECONDS = 24 * 60 * 60;
 const deliveryKey = (id: string) => `gh:delivery:${id}`;
 
-const HANDLERS: Record<string, (body: unknown) => Promise<HandlerResult>> = {
+const HANDLERS: Record<string, (body: unknown, ctx: WebhookContext) => Promise<HandlerResult>> = {
   installation: handleInstallation,
   installation_repositories: handleInstallationRepositories,
-  pull_request: handlePullRequest,
+  // Review behavior first, then the branch-tree event (T5a).
+  pull_request: withTreeEvent(handlePullRequest),
+  push: handlePush,
+  check_run: handleCheckRun,
+  check_suite: handleCheckSuite,
+  status: handleStatus,
   issue_comment: handleIssueComment,
   organization: handleOrganization,
   member: handleMember,
@@ -96,7 +109,7 @@ export async function handleGithubWebhook(req: Request): Promise<Response> {
 
   const log = logger.child({ deliveryId, event });
   try {
-    const result = await handler(body);
+    const result = await handler(body, { deliveryId });
     log.info({ ...result }, 'webhook handled');
     return json({ ok: true, ...result });
   } catch (err) {

@@ -104,3 +104,72 @@ export const MemberPayload = z.object({
   installation: InstallationRef.optional(),
 });
 export type MemberPayload = z.infer<typeof MemberPayload>;
+
+// ---------------------------------------------------------------- branch tree (T5a)
+// Refs, SHAs, flags, PR numbers and CI states only. These schemas deliberately omit `commits`,
+// `head_commit`, `pusher`, `commit` (status event) and every message / author / file field:
+// zod strips them, so they never reach a handler, a DB row or an Inngest event.
+
+/** A commit SHA (SHA-1, or SHA-256 for repos that use it). */
+const GitSha = z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/);
+
+const RepoId = z.object({ id: z.number().int() });
+
+/** `push` event. */
+// VERIFY: shape against https://docs.github.com/webhooks/webhook-events-and-payloads#push
+export const PushPayload = z.object({
+  ref: z.string().min(1),
+  before: GitSha,
+  after: GitSha,
+  created: z.boolean(),
+  deleted: z.boolean(),
+  forced: z.boolean(),
+  repository: RepoId,
+});
+export type PushPayload = z.infer<typeof PushPayload>;
+
+/** The `pull_request` fields the branch tree needs (the review path parses its own schema). */
+export const PullRequestTreePayload = z.object({
+  action: z.string(),
+  pull_request: z.object({
+    number: z.number().int(),
+    head: z.object({ sha: GitSha, ref: z.string().min(1) }),
+  }),
+  /** Present on `edited`; only whether the base changed matters, nothing inside it is read. */
+  changes: z.object({ base: z.unknown().optional() }).optional(),
+  repository: RepoId,
+});
+export type PullRequestTreePayload = z.infer<typeof PullRequestTreePayload>;
+
+const CheckStatus = z.object({
+  head_sha: GitSha,
+  status: z.string().nullish(),
+  conclusion: z.string().nullish(),
+});
+
+/** `check_run` event. */
+// VERIFY: shape against https://docs.github.com/webhooks/webhook-events-and-payloads#check_run
+export const CheckRunPayload = z.object({
+  action: z.string(),
+  check_run: CheckStatus,
+  repository: RepoId,
+});
+export type CheckRunPayload = z.infer<typeof CheckRunPayload>;
+
+/** `check_suite` event. */
+// VERIFY: shape against https://docs.github.com/webhooks/webhook-events-and-payloads#check_suite
+export const CheckSuitePayload = z.object({
+  action: z.string(),
+  check_suite: CheckStatus,
+  repository: RepoId,
+});
+export type CheckSuitePayload = z.infer<typeof CheckSuitePayload>;
+
+/** `status` event (commit status). The payload's `commit` object (message, author) is not read. */
+// VERIFY: shape against https://docs.github.com/webhooks/webhook-events-and-payloads#status
+export const StatusPayload = z.object({
+  sha: GitSha,
+  state: z.enum(['pending', 'success', 'failure', 'error']),
+  repository: RepoId,
+});
+export type StatusPayload = z.infer<typeof StatusPayload>;
