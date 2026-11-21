@@ -4,6 +4,7 @@ import { canEditRepo, requireRepoAccess } from '@/lib/server/access';
 import { json, queryOf, route } from '@/lib/server/http';
 import { requireSession } from '@/server/auth';
 import { logger } from '@/server/logger';
+import { withOverrides } from './overrides';
 import {
   FIRST_VIEW_WINDOW_SECONDS,
   firstViewKey,
@@ -48,12 +49,14 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
     logger.error({ repoId, issues: parsed.error.issues.length }, 'stored tree snapshot is invalid');
   }
   const unreadable = parsed !== null && !parsed.success;
+  // Overrides show right away: re-pick compare-with on the stored graph instead of waiting for a sync.
+  const snapshot = parsed?.success ? await withOverrides(repoId, parsed.data) : null;
 
   return json(GetTreeResponse, {
     status: unreadable && graph.status !== 'syncing' ? 'failed' : graph.status,
     syncedAt: graph.syncedAt?.toISOString() ?? null,
     errorCode: unreadable ? (graph.errorCode ?? 'internal') : graph.errorCode,
-    snapshot: parsed?.success ? parsed.data : null,
+    snapshot,
     canEdit,
   });
 });

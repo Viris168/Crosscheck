@@ -2,12 +2,13 @@ import {
   ApiErrorSchema,
   GetTreeResponse,
   HttpError,
+  SetCompareWithResponse,
   SyncTreeResponse,
   type MemberRole,
 } from '@app/shared';
 import type * as GithubModule from '@app/github';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { seedSnapshot } from '@/components/tree/__fixtures__/seed-snapshot';
+import { seedBranches, seedSnapshot, SEED_SHA } from '@/components/tree/__fixtures__/seed-snapshot';
 
 // ---------------------------------------------------------------- mocks
 
@@ -15,6 +16,9 @@ const db = vi.hoisted(() => ({
   repo: { findUnique: vi.fn() },
   repoGraph: { findUnique: vi.fn() },
   user: { findUnique: vi.fn() },
+  branch: { findMany: vi.fn() },
+  pullRequest: { findMany: vi.fn() },
+  compareOverride: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
 }));
 vi.mock('@app/db', () => ({ prisma: db }));
 
@@ -33,6 +37,12 @@ vi.mock('@/server/auth', () => ({
     return { id: 'm', role };
   }),
 }));
+
+const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
+vi.mock('@/server/logger', () => ({ logger: log }));
+
+/** `CompareOverride` rows, keyed by branch name (repo r1). */
+const overrides = vi.hoisted(() => new Map<string, string>());
 
 const send = vi.hoisted(() => vi.fn());
 vi.mock('@/server/jobs', () => ({ inngest: { send } }));
@@ -64,6 +74,7 @@ vi.mock('@/server/redis', () => ({ getRedis: () => redis }));
 
 const { GET } = await import('./route');
 const { POST } = await import('./sync/route');
+const { PUT } = await import('./compare-with/route');
 
 // ---------------------------------------------------------------- fixtures
 
@@ -91,8 +102,39 @@ const getTree = (repoId = 'r1') => GET(req(`/api/repos/${repoId}/tree`), ctx(rep
 const postSync = (repoId = 'r1') =>
   POST(req(`/api/repos/${repoId}/tree/sync`, { method: 'POST' }), ctx(repoId));
 
+const putCompare = (body: unknown, repoId = 'r1') =>
+  PUT(
+    req(`/api/repos/${repoId}/tree/compare-with`, { method: 'PUT', body: JSON.stringify(body) }),
+    ctx(repoId),
+  );
+
 beforeEach(() => {
   vi.clearAllMocks();
+  overrides.clear();
+  db.compareOverride.findMany.mockImplementation(async () =>
+    [...overrides].map(([branchName, compareWith]) => ({ branchName, compareWith })),
+  );
+  db.compareOverride.upsert.mockImplementation(
+    async ({ create }: { create: { branchName: string; compareWith: string } }) => {
+      overrides.set(create.branchName, create.compareWith);
+      return create;
+    },
+  );
+  db.compareOverride.deleteMany.mockImplementation(
+    async ({ where }: { where: { branchName: string } }) => ({
+      count: overrides.delete(where.branchName) ? 1 : 0,
+    }),
+  );
+  db.branch.findMany.mockImplementation(async ({ where }: { where: { name?: { in: string[] } } }) =>
+    seedBranches
+      .filter((b) => !where.name || where.name.in.includes(b.name))
+      .map((b) => ({ name: b.name, isDefault: b.isDefault, recordedParents: [] })),
+  );
+  db.pullRequest.findMany.mockResolvedValue([
+    { number: 1, headRef: 'chore/readme', baseRef: 'main', state: 'merged', headSha: SEED_SHA.e1 },
+    { number: 2, headRef: 'feature/login', baseRef: 'dev', state: 'open', headSha: SEED_SHA.f3 },
+    { number: 3, headRef: 'hotfix/header', baseRef: 'main', state: 'open', headSha: SEED_SHA.a1 },
+  ]);
   redis.keys.clear();
   redis.down = false;
   auth.user = 'u1';
@@ -237,5 +279,125 @@ describe('POST /api/repos/:repoId/tree/sync', () => {
     redis.down = true;
     expect((await postSync()).status).toBe(200);
     expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------- PUT /tree/compare-with
+
+describe('PUT /api/repos/:repoId/tree/compare-with', () => {
+  beforeEach(() => perm.getRepoPermission.mockResolvedValue('write'));
+
+  const branchOf = (body: GetTreeResponse, name: string) =>
+    body.snapshot!.branches.find((b) => b.name === name)!;
+
+  it('401 without a session', async () => {
+    auth.user = null;
+    expect((await putCompare({ branch: 'dev', compareWith: 'main' })).status).toBe(401);
+  });
+
+  it('403 without write access; nothing is stored', async () => {
+    perm.getRepoPermission.mockResolvedValue('read');
+    const res = await putCompare({ branch: 'feature/login-oauth', compareWith: 'feature/login' });
+    expect(res.status).toBe(403);
+    expect(db.compareOverride.upsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['self', { branch: 'dev', compareWith: 'dev' }],
+    ['unknown branch', { branch: 'nope', compareWith: 'main' }],
+    ['unknown target', { branch: 'dev', compareWith: 'nope' }],
+    ['default branch', { branch: 'main', compareWith: 'dev' }],
+    ['cycle', { branch: 'dev', compareWith: 'feature/login' }],
+    ['cycle through two branches', { branch: 'dev', compareWith: 'feature/login-oauth' }],
+    ['bad body', { branch: '' }],
+  ])('400 on %s', async (_label, body) => {
+    const res = await putCompare(body);
+    expect(res.status).toBe(400);
+    expect(await errCode(res)).toBe('bad_request');
+    expect(db.compareOverride.upsert).not.toHaveBeenCalled();
+  });
+
+  it('409 when the tree has not been built yet', async () => {
+    db.repoGraph.findUnique.mockResolvedValue(null);
+    const res = await putCompare({ branch: 'feature/login-oauth', compareWith: 'feature/login' });
+    expect(res.status).toBe(409);
+  });
+
+  it('stores the override and returns the recomputed branch', async () => {
+    const res = await putCompare({ branch: 'feature/login-oauth', compareWith: 'feature/login' });
+    expect(res.status).toBe(200);
+    const { branch } = SetCompareWithResponse.parse(await res.json());
+    expect(branch).toMatchObject({
+      name: 'feature/login-oauth',
+      compareWith: 'feature/login',
+      why: 'override',
+      ahead: 1,
+      behind: 1,
+      mergeBase: SEED_SHA.f2,
+    });
+    expect(db.compareOverride.upsert).toHaveBeenCalledWith({
+      where: { repoId_branchName: { repoId: 'r1', branchName: 'feature/login-oauth' } },
+      create: {
+        repoId: 'r1',
+        branchName: 'feature/login-oauth',
+        compareWith: 'feature/login',
+        setByUserId: 'u1',
+      },
+      update: { compareWith: 'feature/login', setByUserId: 'u1' },
+    });
+  });
+
+  it('logs the rule that picked before, without branch names', async () => {
+    await putCompare({ branch: 'feature/login-oauth', compareWith: 'feature/login' });
+    expect(log.info).toHaveBeenCalledWith(
+      { repoId: 'r1', whyBefore: 'inferred', cleared: false },
+      'compare-with override',
+    );
+    expect(JSON.stringify(log.info.mock.calls)).not.toContain('feature/');
+  });
+
+  it('GET shows the override at once, without a sync', async () => {
+    await putCompare({ branch: 'feature/login-oauth', compareWith: 'feature/login' });
+    const body = GetTreeResponse.parse(await (await getTree()).json());
+    expect(branchOf(body, 'feature/login-oauth')).toMatchObject({
+      compareWith: 'feature/login',
+      why: 'override',
+      ahead: 1,
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('the override survives a sync that wrote a fresh snapshot', async () => {
+    overrides.set('feature/login-oauth', 'feature/login');
+    // A sync writes a new snapshot; the row is untouched, and GET still applies it.
+    db.repoGraph.findUnique.mockResolvedValue({ ...graph, snapshot: seedSnapshot() });
+    const body = GetTreeResponse.parse(await (await getTree()).json());
+    expect(branchOf(body, 'feature/login-oauth')).toMatchObject({
+      compareWith: 'feature/login',
+      why: 'override',
+    });
+  });
+
+  it('reset (null) removes the row and goes back to the automatic pick', async () => {
+    overrides.set('feature/login-oauth', 'feature/login');
+    const stored = seedSnapshot();
+    stored.branches = stored.branches.map((b) =>
+      b.name === 'feature/login-oauth'
+        ? { ...b, compareWith: 'feature/login', why: 'override' as const, ahead: 1, behind: 1 }
+        : b,
+    );
+    db.repoGraph.findUnique.mockResolvedValue({ ...graph, snapshot: stored });
+
+    const res = await putCompare({ branch: 'feature/login-oauth', compareWith: null });
+    expect(res.status).toBe(200);
+    const { branch } = SetCompareWithResponse.parse(await res.json());
+    expect(branch).toMatchObject({ compareWith: 'dev', why: 'inferred', ahead: 3, behind: 1 });
+    expect(overrides.has('feature/login-oauth')).toBe(false);
+
+    const body = GetTreeResponse.parse(await (await getTree()).json());
+    expect(branchOf(body, 'feature/login-oauth')).toMatchObject({
+      compareWith: 'dev',
+      why: 'inferred',
+    });
   });
 });
