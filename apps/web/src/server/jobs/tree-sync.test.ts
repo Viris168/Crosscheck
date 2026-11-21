@@ -16,13 +16,20 @@ import {
 } from './repo-cache';
 import {
   CI_MAX_PER_RUN,
+  MERGED_CACHE_TTL_S,
+  applyContentMerged,
+  mergedCacheField,
   planBranches,
   planPrs,
   treeSyncHandler,
   type ExistingPr,
   type TreePr,
+  type MergedDetectInput,
+  type MergedOutcome,
+  type TreeMerged,
   type TreeStore,
   type TreeSyncDeps,
+  redisTreeMerged,
 } from './tree-sync';
 
 const ISOLATED = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
@@ -177,6 +184,34 @@ function pr(over: Partial<TreePr> & Pick<TreePr, 'number' | 'headRef' | 'headSha
   };
 }
 
+/** In-memory merged cache + a scripted detector (stands in for T3a's workspace). */
+function fakeMerged() {
+  const state = {
+    hash: new Map<string, string>(),
+    detectCalls: [] as MergedDetectInput[],
+    answer: new Map<string, MergedOutcome>(),
+    fail: null as Error | null,
+  };
+  const merged: TreeMerged = {
+    async detect(_repo, _auth, input) {
+      state.detectCalls.push(input);
+      if (state.fail) throw state.fail;
+      return new Map(
+        input.branches.flatMap((b) =>
+          state.answer.has(b.name) ? [[b.name, state.answer.get(b.name)!] as const] : [],
+        ),
+      );
+    },
+    async readCache() {
+      return new Map(state.hash);
+    },
+    async writeCache(_id, entries) {
+      state.hash = new Map(entries);
+    },
+  };
+  return { state, merged };
+}
+
 const event = { data: { repoId: REPO.id, orgId: REPO.orgId, reason: 'manual' as const } };
 
 describe('tree-sync against a local fixture repo', () => {
@@ -188,6 +223,7 @@ describe('tree-sync against a local fixture repo', () => {
   let ciCalls: string[];
   let ciAnswer: CiState;
   let prs: TreePr[];
+  let fm: ReturnType<typeof fakeMerged>;
   const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
   beforeEach(() => {
@@ -202,6 +238,7 @@ describe('tree-sync against a local fixture repo', () => {
     cacheDir = mkdtempSync(path.join(tmpdir(), 't2c-sync-'));
     auth = { url: repo.url, env: ISOLATED };
     fake = fakeStore();
+    fm = fakeMerged();
     ciCalls = [];
     ciAnswer = 'success';
     prs = [pr({ number: 1, headRef: 'feature/login', headSha: repo.head('feature/login') })];
@@ -233,6 +270,7 @@ describe('tree-sync against a local fixture repo', () => {
         ensureClone: (r, a) => ensureClone(r, a, { cacheDir, lock, assertNoContents: true }),
         readGraph: (r, heads) => readCloneGraph(r, heads, { cacheDir, lock }),
       },
+      merged: fm.merged,
       now: () => NOW,
       log,
     };
@@ -248,7 +286,7 @@ describe('tree-sync against a local fixture repo', () => {
     const result = await treeSyncHandler({ event, step: runner.step }, deps);
 
     expect(result).toEqual({ status: 'ready', branches: 2, commits: 4, truncated: false });
-    expect([...runner.calls.keys()]).toEqual(['load-refs', 'fetch', 'ci', 'snapshot']);
+    expect([...runner.calls.keys()]).toEqual(['load-refs', 'fetch', 'ci', 'merged', 'snapshot']);
     expect(fake.db.graph?.status).toBe('ready');
     expect(fake.db.graph?.defaultBranch).toBe('main');
     expect(fake.db.graph?.syncedAt).toEqual(NOW);
@@ -269,6 +307,10 @@ describe('tree-sync against a local fixture repo', () => {
   });
 
   it('step outputs hold only counts and flags (Inngest persists them)', async () => {
+    repo.branch('fix/squashed', 'main');
+    repo.commit('squashed elsewhere');
+    repo.checkout('main');
+    fm.state.answer.set('fix/squashed', 'squashed');
     const runner = createFakeRunner();
     await treeSyncHandler({ event, step: runner.step }, deps);
     const outputs = Object.fromEntries(runner.outputs);
@@ -277,15 +319,15 @@ describe('tree-sync against a local fixture repo', () => {
         "ci": {
           "cached": 0,
           "deferred": 0,
-          "fetched": 2,
-          "heads": 2,
+          "fetched": 3,
+          "heads": 3,
         },
         "fetch": {
           "ok": true,
         },
         "load-refs": {
-          "branches": 2,
-          "branchesCreated": 2,
+          "branches": 3,
+          "branchesCreated": 3,
           "branchesDeleted": 0,
           "branchesUpdated": 0,
           "prs": 1,
@@ -293,9 +335,18 @@ describe('tree-sync against a local fixture repo', () => {
           "prsUpdated": 0,
           "skipped": false,
         },
+        "merged": {
+          "byVia": {
+            "pr": 0,
+            "rebased": 0,
+            "squashed": 1,
+          },
+          "checked": 2,
+          "merged": 1,
+        },
         "snapshot": {
-          "branches": 2,
-          "commits": 4,
+          "branches": 3,
+          "commits": 5,
           "skippedBranches": 0,
           "truncated": false,
         },
@@ -412,6 +463,165 @@ describe('tree-sync against a local fixture repo', () => {
     expect(runner.calls.get('fetch')).toBe(2); // retried once, then gave up
     expect(fake.db.graph?.status).toBe('syncing');
     expect(runner.calls.has('mark-failed')).toBe(false);
+  });
+
+  describe('merged step', () => {
+    beforeEach(() => {
+      repo.branch('fix/squashed', 'main');
+      repo.commit('squash me');
+      repo.checkout('main');
+      repo.branch('fix/rebased', 'main');
+      repo.commit('rebase me');
+      repo.checkout('main');
+      fm.state.answer.set('fix/squashed', 'squashed');
+      fm.state.answer.set('fix/rebased', 'rebased');
+      fm.state.answer.set('feature/login', null);
+    });
+
+    const snapBranch = (name: string) =>
+      TreeSnapshotSchema.parse(fake.db.graph!.snapshot).branches.find((b) => b.name === name)!;
+
+    it('runs between ci and snapshot and feeds content results into the snapshot', async () => {
+      const runner = createFakeRunner();
+      expect(await treeSyncHandler({ event, step: runner.step }, deps)).toMatchObject({
+        status: 'ready',
+      });
+      expect([...runner.calls.keys()]).toEqual(['load-refs', 'fetch', 'ci', 'merged', 'snapshot']);
+      expect(fm.state.detectCalls).toHaveLength(1);
+      expect(fm.state.detectCalls[0]!.branches.map((b) => [b.name, b.compareWith]).sort()).toEqual([
+        ['feature/login', 'main'],
+        ['fix/rebased', 'main'],
+        ['fix/squashed', 'main'],
+      ]);
+      expect(runner.outputs.get('merged')).toEqual({
+        checked: 3,
+        merged: 2,
+        byVia: { pr: 0, rebased: 1, squashed: 1 },
+      });
+      expect(snapBranch('fix/squashed').merged).toEqual({
+        via: 'squashed',
+        prNumber: null,
+        method: null,
+        into: 'main',
+        newCommits: 0,
+        mergeCommitSha: null,
+      });
+      expect(snapBranch('fix/rebased').merged?.via).toBe('rebased');
+      expect(snapBranch('feature/login').merged).toBeNull();
+      const main = repo.head('main');
+      expect(fm.state.hash).toEqual(
+        new Map([
+          [mergedCacheField('fix/squashed', repo.head('fix/squashed'), main), 'squashed'],
+          [mergedCacheField('fix/rebased', repo.head('fix/rebased'), main), 'rebased'],
+          [mergedCacheField('feature/login', repo.head('feature/login'), main), 'none'],
+        ]),
+      );
+    });
+
+    it('a cache hit skips the workspace; a moved head is checked again', async () => {
+      await treeSyncHandler({ event, step: createFakeRunner().step }, deps);
+      fm.state.detectCalls = [];
+
+      const runner = createFakeRunner();
+      await treeSyncHandler({ event, step: runner.step }, deps);
+      expect(fm.state.detectCalls).toEqual([]);
+      expect(runner.outputs.get('merged')).toEqual({
+        checked: 0,
+        merged: 2,
+        byVia: { pr: 0, rebased: 1, squashed: 1 },
+      });
+      expect(snapBranch('fix/squashed').merged?.via).toBe('squashed');
+
+      repo.checkout('fix/squashed');
+      repo.commit('more work');
+      repo.checkout('main');
+      fm.state.answer.set('fix/squashed', null);
+      await treeSyncHandler({ event, step: createFakeRunner().step }, deps);
+      expect(fm.state.detectCalls.map((c) => c.branches.map((b) => b.name))).toEqual([
+        ['fix/squashed'],
+      ]);
+      expect(snapBranch('fix/squashed').merged).toBeNull();
+      expect(snapBranch('fix/rebased').merged?.via).toBe('rebased');
+      expect(fm.state.hash.size).toBe(3); // the old head's field is dropped
+    });
+
+    it('a branch with a merged PR uses rule 1 and never reaches the workspace', async () => {
+      prs = [
+        pr({
+          number: 7,
+          headRef: 'fix/squashed',
+          headSha: repo.head('fix/squashed'),
+          state: 'merged',
+          mergedAt: NOW.toISOString(),
+        }),
+      ];
+      const runner = createFakeRunner();
+      await treeSyncHandler({ event, step: runner.step }, deps);
+      expect(fm.state.detectCalls[0]!.branches.map((b) => b.name)).not.toContain('fix/squashed');
+      expect(runner.outputs.get('merged')).toMatchObject({ byVia: { pr: 1, squashed: 0 } });
+      expect(snapBranch('fix/squashed').merged).toMatchObject({ via: 'pr', prNumber: 7 });
+    });
+
+    it('a workspace error never fails the sync: logged, branches unmerged, nothing cached', async () => {
+      fm.state.fail = new Error('[timeout] workspace for acme/web fix/squashed timed out');
+      const runner = createFakeRunner({ retries: 0 });
+      const result = await treeSyncHandler({ event, step: runner.step }, deps);
+      expect(result).toMatchObject({ status: 'ready' });
+      expect(fake.db.graph?.status).toBe('ready');
+      expect(snapBranch('fix/squashed').merged).toBeNull();
+      expect(fm.state.hash.size).toBe(0);
+      expect(runner.outputs.get('merged')).toEqual({
+        checked: 3,
+        merged: 0,
+        byVia: { pr: 0, rebased: 0, squashed: 0 },
+      });
+      expect(log.warn).toHaveBeenCalledWith(
+        { repoId: REPO.id, reason: 'workspace_failed', errorCode: 'timeout' },
+        expect.any(String),
+      );
+      const logged = JSON.stringify(log.warn.mock.calls);
+      expect(logged).not.toMatch(/fix\/squashed|acme/);
+    });
+
+    it('a git-auth error in the merged step is a workspace failure too', async () => {
+      let calls = 0;
+      deps.github.gitAuth = async () => {
+        if (++calls > 1) throw new Error('token failed'); // `fetch` gets one, `merged` does not
+        return auth;
+      };
+      const runner = createFakeRunner({ retries: 0 });
+      expect(await treeSyncHandler({ event, step: runner.step }, deps)).toMatchObject({
+        status: 'ready',
+      });
+      expect(fm.state.detectCalls).toEqual([]);
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: 'workspace_failed' }),
+        expect.any(String),
+      );
+    });
+
+    it('branches the detector did not check (cap, timeout) are not cached', async () => {
+      fm.state.answer.delete('fix/rebased');
+      await treeSyncHandler({ event, step: createFakeRunner().step }, deps);
+      expect([...fm.state.hash.values()].sort()).toEqual(['none', 'squashed']);
+      fm.state.detectCalls = [];
+      await treeSyncHandler({ event, step: createFakeRunner().step }, deps);
+      expect(fm.state.detectCalls.map((c) => c.branches.map((b) => b.name))).toEqual([
+        ['fix/rebased'],
+      ]);
+    });
+
+    it('a cache outage does not fail the sync', async () => {
+      fm.merged.readCache = () => Promise.reject(new Error('redis down'));
+      fm.merged.writeCache = () => Promise.reject(new Error('redis down'));
+      expect(await treeSyncHandler({ event, step: createFakeRunner().step }, deps)).toMatchObject({
+        status: 'ready',
+      });
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: 'cache_unavailable' }),
+        expect.any(String),
+      );
+    });
   });
 
   it('fetches CI for at most 200 heads per run, default branch first', async () => {
@@ -534,5 +744,87 @@ describe('planPrs', () => {
         [merged],
       ),
     ).toEqual({ create: [], update: [] });
+  });
+});
+
+describe('applyContentMerged', () => {
+  const node = (name: string, headSha: string, extra: object = {}) => ({
+    name,
+    headSha,
+    isDefault: false,
+    compareWith: 'main' as string | null,
+    why: 'inferred' as const,
+    whyPr: null,
+    ambiguous: null,
+    loop: false,
+    ahead: 1,
+    behind: 0,
+    mergeBase: null,
+    merged: null as null | {
+      via: 'pr' | 'rebased' | 'squashed';
+      prNumber: number | null;
+      method: null;
+      into: string;
+      newCommits: number;
+    },
+    pr: null,
+    ci: 'none' as const,
+    recorded: false,
+    ...extra,
+  });
+
+  it('marks only unmerged branches whose head and target match the cached field', () => {
+    const heads = new Map([
+      ['main', 'm1'],
+      ['a', 'a1'],
+      ['b', 'b1'],
+      ['c', 'c1'],
+    ]);
+    const prMerged = { via: 'pr' as const, prNumber: 3, method: null, into: 'main', newCommits: 0 };
+    const branches = [
+      node('main', 'm1', { isDefault: true, compareWith: null }),
+      node('a', 'a1'),
+      node('b', 'b1', { merged: prMerged }),
+      node('c', 'c1'),
+    ];
+    applyContentMerged(
+      branches,
+      heads,
+      new Map([
+        [mergedCacheField('a', 'a1', 'm1'), 'squashed'],
+        [mergedCacheField('b', 'b1', 'm1'), 'rebased'],
+        [mergedCacheField('c', 'c1', 'OLD'), 'rebased'],
+      ]),
+    );
+    expect(branches.map((b) => b.merged?.via ?? null)).toEqual([null, 'squashed', 'pr', null]);
+  });
+});
+
+describe('redisTreeMerged', () => {
+  it('replaces the hash and sets a 7-day TTL; ids and SHAs only', async () => {
+    const ops: unknown[][] = [];
+    const redis = {
+      hgetall: async (k: string) => (ops.push(['hgetall', k]), { f: 'squashed' }),
+      multi: () => ({
+        del: (k: string) => ops.push(['del', k]),
+        hset: (k: string, v: Record<string, string>) => ops.push(['hset', k, v]),
+        expire: (k: string, s: number) => ops.push(['expire', k, s]),
+        exec: async () => ops.push(['exec']),
+      }),
+    };
+    const m = redisTreeMerged(redis, async () => new Map());
+    expect(await m.readCache('repo_1')).toEqual(new Map([['f', 'squashed']]));
+    await m.writeCache('repo_1', new Map([['x@a@b', 'none']]));
+    await m.writeCache('repo_1', new Map());
+    expect(MERGED_CACHE_TTL_S).toBe(604_800);
+    expect(ops).toEqual([
+      ['hgetall', 'tree:merged:repo_1'],
+      ['del', 'tree:merged:repo_1'],
+      ['hset', 'tree:merged:repo_1', { 'x@a@b': 'none' }],
+      ['expire', 'tree:merged:repo_1', 604_800],
+      ['exec'],
+      ['del', 'tree:merged:repo_1'],
+      ['exec'],
+    ]);
   });
 });

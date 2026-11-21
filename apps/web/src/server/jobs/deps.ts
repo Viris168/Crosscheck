@@ -10,6 +10,7 @@ import {
   listPullRequestsForTree,
   splitFullName,
 } from '@app/github';
+import { CommitGraph, prMerge } from '@app/git-graph';
 import { getProvider } from '@app/providers';
 import type { ProviderId, ReviewFile, ReviewIssue, ReviewProvider, RiskResult } from '@app/shared';
 import * as comments from '@app/github-comments';
@@ -17,9 +18,22 @@ import * as scoring from '@app/scoring';
 import { env } from '@/server/env';
 import { logger } from '@/server/logger';
 import { getRedis } from '@/server/redis';
-import { ensureClone, readCloneGraph, redisRepoLock, type GitAuth } from './repo-cache';
+import {
+  cloneDir,
+  ensureClone,
+  readCloneGraph,
+  redisRepoLock,
+  withRepoLock,
+  type GitAuth,
+} from './repo-cache';
 import { prismaJobsStore, type JobsStore } from './store';
-import { prismaTreeStore, type TreeSyncDeps } from './tree-sync';
+import {
+  prismaTreeStore,
+  redisTreeMerged,
+  type MergedDetectInput,
+  type MergedOutcome,
+  type TreeSyncDeps,
+} from './tree-sync';
 
 export interface PrRef {
   installationId: number;
@@ -164,7 +178,48 @@ export function realTreeSyncDeps(): TreeSyncDeps {
       readGraph: (repo, heads) =>
         readCloneGraph(repo, heads, { cacheDir, lock, lockWaitMs: TREE_LOCK_WAIT_MS }),
     },
+    merged: redisTreeMerged(getRedis(), async (repo, auth, input) =>
+      // Under the clone lock: the workspace is a `--shared` clone of the cache, so the cache must not be
+      // fetched/repacked while it is open.
+      withRepoLock(
+        lock,
+        repo.githubRepoId,
+        () =>
+          detectMergedWithFallbacks(cloneDir(cacheDir, repo.githubRepoId), auth, input, {
+            maxBranches: MERGED_MAX_BRANCHES,
+            perBranchTimeoutMs: MERGED_BRANCH_TIMEOUT_MS,
+          }),
+        { waitMs: TREE_LOCK_WAIT_MS, ttlMs: MERGED_LOCK_TTL_MS },
+      ),
+    ),
     now: () => new Date(),
     log: logger,
   };
+}
+
+// --- merged state (T3b) ---
+
+/** Content checks per sync and per branch (tasks/T-branch-tree.md → "Merged-state rules"). */
+const MERGED_MAX_BRANCHES = 50;
+const MERGED_BRANCH_TIMEOUT_MS = 10_000;
+/** Lock TTL while the workspace is open: 50 branches × 10 s plus slack for the clone and fetch. */
+const MERGED_LOCK_TTL_MS = 15 * 60_000;
+
+/**
+ * MOCK(T3a): stands in for `detectMergedWithFallbacks` from `@app/git-graph/git` until T3a merges
+ * (signature in tasks/T3a-merged-detection.md). Applies rule 1 (PR record) only and leaves every other
+ * branch out of the result ("not checked"), so nothing is cached as `none` that the real content rule
+ * (rule 2) could later mark merged. Swap: import the real one and adapt its result to `MergedOutcome`.
+ * VERIFY(T3a): the real `graphInput` shape and return type; adapt here, not in tree-sync.ts.
+ */
+async function detectMergedWithFallbacks(
+  _cacheGitDir: string,
+  _auth: GitAuth,
+  input: MergedDetectInput,
+  _opts: { maxBranches: number; perBranchTimeoutMs: number },
+): Promise<Map<string, MergedOutcome>> {
+  const graph = new CommitGraph(input.graph);
+  const out = new Map<string, MergedOutcome>();
+  for (const b of input.branches) if (prMerge(graph, b, input.prs)) out.set(b.name, 'pr');
+  return out;
 }

@@ -3,13 +3,21 @@
 // Privacy: Inngest persists step outputs, so every step returns counts only: never commits, SHAs lists,
 // branch names, PR titles or the repo name. Each step re-reads what it needs from the DB.
 import { prisma } from '@app/db';
-import { buildSnapshot, type CommitInput, type PrRecord } from '@app/git-graph';
+import {
+  CommitGraph,
+  buildSnapshot,
+  pickCompareWith,
+  prMerge,
+  type CommitInput,
+  type PrRecord,
+} from '@app/git-graph';
 import {
   TREE_MAX_BRANCHES,
   TREE_MAX_COMMITS,
   TreeSnapshotSchema,
   type CiState,
   type ErrorCode,
+  type MergedVia,
   type TreeSnapshot,
   type TreeSyncReason,
 } from '@app/shared';
@@ -120,10 +128,53 @@ export interface TreeStore {
   ): Promise<void>;
 }
 
+// --- merged state (T3b; rules in tasks/T-branch-tree.md → "Merged-state rules") ---
+
+/** One branch the detector checks: its head and its compare-with target. */
+export interface MergedDetectBranch {
+  name: string;
+  headSha: string;
+  compareWith: string;
+  targetSha: string;
+}
+
+export interface MergedDetectInput {
+  defaultBranch: string;
+  branches: MergedDetectBranch[];
+  graph: readonly CommitInput[];
+  prs: readonly PrRecord[];
+}
+
+/** Per branch name: how it merged, or null = checked and not merged. A branch left out was not checked. */
+export type MergedOutcome = MergedVia | null;
+
+/** Cached outcome per `branch@headSha@targetSha`. */
+export type MergedCacheValue = MergedVia | 'none';
+
+export interface TreeMerged {
+  /** T3a's `detectMergedWithFallbacks` on the repo's clone. Opens the throwaway workspace; may throw. */
+  detect(
+    repo: TreeRepo,
+    auth: GitAuth,
+    input: MergedDetectInput,
+  ): Promise<ReadonlyMap<string, MergedOutcome>>;
+  /** Redis hash `tree:merged:<repoId>` (field `branch@headSha@targetSha`). */
+  readCache(repoId: string): Promise<Map<string, string>>;
+  /** Replaces the hash with `entries` (drops fields for old heads) and sets its 7-day TTL. */
+  writeCache(repoId: string, entries: ReadonlyMap<string, MergedCacheValue>): Promise<void>;
+}
+
+/** The cache's TTL: the content rule runs at most once per branch head per week. */
+export const MERGED_CACHE_TTL_S = 7 * 24 * 60 * 60;
+export const mergedCacheKey = (repoId: string) => `tree:merged:${repoId}`;
+export const mergedCacheField = (name: string, headSha: string, targetSha: string) =>
+  `${name}@${headSha}@${targetSha}`;
+
 export interface TreeSyncDeps {
   store: TreeStore;
   github: TreeGithub;
   cache: TreeCache;
+  merged: TreeMerged;
   now(): Date;
   log: JobLogger;
 }
@@ -157,7 +208,7 @@ export async function treeSyncHandler(
 ): Promise<TreeSyncResult> {
   const { repoId, reason } = ctx.event.data;
   const { step } = ctx;
-  const { store, github, cache, log } = deps;
+  const { store, github, cache, merged, log } = deps;
 
   const loadRepo = async (): Promise<TreeRepo> => {
     const repo = await store.getRepo(repoId);
@@ -228,8 +279,8 @@ export async function treeSyncHandler(
       };
     });
 
-    const snap = await step.run('snapshot', async () => {
-      const repo = await loadRepo();
+    /** What both `merged` and `snapshot` build on. Re-read per step: step outputs carry counts only. */
+    const readInputs = async (repo: TreeRepo) => {
       const all = await store.liveBranches(repoId);
       const def = all.find((b) => b.isDefault);
       if (!def) throw nonRetriable('internal', 'repo has no default branch');
@@ -239,11 +290,116 @@ export async function treeSyncHandler(
       if (graph.missing.has(def.headSha))
         throw retriable('github_error', 'default branch head not in clone yet');
       const branches = capped.filter((b) => !graph.missing.has(b.headSha));
-      const [prs, overrides, ci] = await Promise.all([
+      const [prs, overrides] = await Promise.all([
         store.prRecords(repoId),
         store.overrides(repoId),
-        store.ciStates(repoId, unique(branches.map((b) => b.headSha))),
       ]);
+      return { all, def, capped, graph, branches, prs, overrides };
+    };
+
+    await step.run('merged', async () => {
+      const repo = await loadRepo();
+      const out = { checked: 0, merged: 0, byVia: { pr: 0, rebased: 0, squashed: 0 } };
+      const count = (via: MergedVia) => {
+        out.merged++;
+        out.byVia[via]++;
+      };
+      // Nothing in here fails the sync: on any error those branches simply stay unmerged.
+      let stage: 'graph' | 'cache' | 'workspace' = 'graph';
+      try {
+        const { def, graph, branches, prs, overrides } = await readInputs(repo);
+        const cg = new CommitGraph(graph.commits);
+        const choices = pickCompareWith({
+          graph: cg,
+          defaultBranch: def.name,
+          branches,
+          overrides,
+          prs,
+        });
+        const heads = new Map(branches.map((b) => [b.name, b.headSha]));
+        stage = 'cache';
+        const cached = await merged.readCache(repoId).catch((err: unknown) => {
+          log.warn(
+            { repoId, reason: 'cache_unavailable', errorCode: errorCodeOf(err) },
+            'tree-sync merged: cache read failed',
+          );
+          return new Map<string, string>();
+        });
+        const keep = new Map<string, MergedCacheValue>();
+        const todo: MergedDetectBranch[] = [];
+        const fieldOf = new Map<string, string>();
+        for (const b of branches) {
+          if (b.name === def.name) continue;
+          // Rule 1 (PR record) is cheap and always fresh: `buildSnapshot` applies it again.
+          if (prMerge(cg, b, prs)) {
+            count('pr');
+            continue;
+          }
+          const target = choices.get(b.name)?.compareWith;
+          const targetSha = target ? heads.get(target) : undefined;
+          if (!target || !targetSha) continue;
+          const field = mergedCacheField(b.name, b.headSha, targetSha);
+          const hit = parseCached(cached.get(field));
+          if (hit) {
+            keep.set(field, hit);
+            if (hit !== 'none') count(hit);
+            continue;
+          }
+          fieldOf.set(b.name, field);
+          todo.push({ name: b.name, headSha: b.headSha, compareWith: target, targetSha });
+        }
+        if (todo.length) {
+          stage = 'workspace';
+          out.checked = todo.length;
+          try {
+            const auth = await github.gitAuth(repo); // fresh token: the workspace fetches contents
+            const found = await merged.detect(repo, auth, {
+              defaultBranch: def.name,
+              branches: todo,
+              graph: graph.commits,
+              prs,
+            });
+            for (const b of todo) {
+              const r = found.get(b.name);
+              if (r === undefined) continue; // not checked (cap or timeout): try again next sync
+              keep.set(fieldOf.get(b.name)!, r ?? 'none');
+              if (r) count(r);
+            }
+          } catch (err) {
+            log.warn(
+              { repoId, reason: 'workspace_failed', errorCode: errorCodeOf(err) },
+              'tree-sync merged: content check failed',
+            );
+          }
+        }
+        stage = 'cache';
+        await merged.writeCache(repoId, keep).catch((err: unknown) => {
+          log.warn(
+            { repoId, reason: 'cache_unavailable', errorCode: errorCodeOf(err) },
+            'tree-sync merged: cache write failed',
+          );
+        });
+      } catch (err) {
+        log.warn(
+          { repoId, reason: `${stage}_failed`, errorCode: errorCodeOf(err) },
+          'tree-sync merged: skipped',
+        );
+      }
+      return out;
+    });
+
+    const snap = await step.run('snapshot', async () => {
+      const repo = await loadRepo();
+      const { all, def, capped, graph, branches, prs, overrides } = await readInputs(repo);
+      const ci = await store.ciStates(repoId, unique(branches.map((b) => b.headSha)));
+      const contentMerged = await merged.readCache(repoId).catch((err: unknown) => {
+        log.warn(
+          { repoId, reason: 'cache_unavailable', errorCode: errorCodeOf(err) },
+          'tree-sync snapshot: merged cache read failed',
+        );
+        return new Map<string, string>();
+      });
+      const headOf = new Map(branches.map((b) => [b.name, b.headSha]));
       const truncated = graph.truncated || capped.length < all.length;
       let snapshot: TreeSnapshot | undefined;
       for (const cap of COMMIT_CAPS) {
@@ -262,6 +418,7 @@ export async function treeSyncHandler(
           truncated,
           maxCommitsPerBranch: cap,
         });
+        applyContentMerged(built.branches, headOf, contentMerged);
         if (built.commits.length <= TREE_MAX_COMMITS || cap === COMMIT_CAPS.at(-1)) {
           if (built.commits.length > TREE_MAX_COMMITS) {
             built.commits = built.commits.slice(-TREE_MAX_COMMITS);
@@ -308,6 +465,31 @@ export async function treeSyncHandler(
     // errorMessageOf: our own messages; git errors are scrubbed of tokens by runGit.
     log.error({ repoId, reason, errorCode: code, err: errorMessageOf(err) }, 'tree-sync failed');
     return { status: 'failed', errorCode: code };
+  }
+}
+
+// --- merged state (pure) ---
+
+function parseCached(v: string | undefined): MergedCacheValue | null {
+  return v === 'pr' || v === 'rebased' || v === 'squashed' || v === 'none' ? v : null;
+}
+
+/**
+ * Rule 2 (content) results from the cache onto branches rule 1 left unmerged.
+ * VERIFY(T3a): once `buildSnapshot` takes the content results itself, pass them in and drop this.
+ */
+export function applyContentMerged(
+  branches: ReturnType<typeof buildSnapshot>['branches'],
+  headOf: ReadonlyMap<string, string>,
+  cached: ReadonlyMap<string, string>,
+): void {
+  for (const b of branches) {
+    if (b.merged || b.isDefault || !b.compareWith) continue;
+    const targetSha = headOf.get(b.compareWith);
+    if (!targetSha) continue;
+    const via = cached.get(mergedCacheField(b.name, b.headSha, targetSha));
+    if (via === 'rebased' || via === 'squashed')
+      b.merged = { via, prNumber: null, method: null, into: b.compareWith, newCommits: 0 };
   }
 }
 
@@ -576,6 +758,38 @@ export const prismaTreeStore: TreeStore = {
     await prisma.repoGraph.upsert({ where: { repoId }, create: { repoId, ...data }, update: data });
   },
 };
+
+// --- Redis merged cache ---
+
+/** The subset of ioredis the merged cache uses. */
+export interface MergedRedis {
+  hgetall(key: string): Promise<Record<string, string>>;
+  multi(): {
+    del(key: string): unknown;
+    hset(key: string, values: Record<string, string>): unknown;
+    expire(key: string, seconds: number): unknown;
+    exec(): Promise<unknown>;
+  };
+}
+
+export function redisTreeMerged(redis: MergedRedis, detect: TreeMerged['detect']): TreeMerged {
+  return {
+    detect,
+    async readCache(repoId) {
+      return new Map(Object.entries(await redis.hgetall(mergedCacheKey(repoId))));
+    },
+    async writeCache(repoId, entries) {
+      const key = mergedCacheKey(repoId);
+      const tx = redis.multi();
+      tx.del(key);
+      if (entries.size) {
+        tx.hset(key, Object.fromEntries(entries));
+        tx.expire(key, MERGED_CACHE_TTL_S);
+      }
+      await tx.exec();
+    },
+  };
+}
 
 // --- helpers ---
 
