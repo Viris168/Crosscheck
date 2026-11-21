@@ -178,9 +178,8 @@ next sign-in or via **Check again**.
 
 **Branch tree (Commit statuses Read + Push, Check run, Check suite, Status events).** Adding these is the
 same kind of change: each installation's owner gets a *Review request* and must accept it. Nothing breaks
-before they do, it is just less fresh: CI shows `none` on every branch (the platform can't read commit
-statuses, and check runs arrive without their events), and the tree doesn't update on push; it is
-refreshed by the 15-minute cron and the **Sync** button instead. After accepting, the next push or CI
+before they do, it is just less fresh: CI shows `none` on every branch, and the tree doesn't update on
+push; it is refreshed by the 15-minute cron and the **Sync** button instead. After accepting, the next push or CI
 event updates the tree within seconds.
 
 ### 3.4 Secrets
@@ -259,6 +258,7 @@ Postgres). To drop it (e.g. after moving servers or to free space):
 
 - **Size:** commits only (no trees, no blobs), so roughly 0.5–1 KB per commit: a 50k-commit repo is
   ~25–50 MB. Budget ~2 GB on the VPS disk and watch it with `docker system df -v | grep repo-cache`.
+  <!-- VERIFY: per-commit size estimate; measure on a real 50k-commit repo in T6a. -->
   Docker named volumes have no built-in size cap on the default `local` driver; if you need a hard cap,
   put `/var/lib/docker/volumes/ai-review_repo-cache` on its own small filesystem (or LVM volume).
 - **Cleanup:** a clone whose repo was removed from the platform (App uninstalled, repo deselected) is
