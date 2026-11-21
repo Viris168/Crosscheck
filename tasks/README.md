@@ -105,6 +105,32 @@ First message to each agent (swap the task file):
 Integration pass (after wave 3): with the GitHub App's new permissions accepted on a test org, check every
 item under "Done when" in `tasks/H-repo-collaborators.md` with real accounts.
 
+## Task T — Branch tree
+Spec: `tasks/T-branch-tree.md` (every T agent reads it). One task file per agent; start a wave only when
+the previous one is merged. Before wave 1, save the prototype as `docs/branch-tree/prototype.html`.
+
+| Wave | Milestone | Agents (task files) |
+|---|---|---|
+| 1 | 1 + groundwork | `T0-contracts.md` (Foundation) · `T1-graph-engine.md` (T) · `T2a-infra.md` (G) |
+| 2 | 2 | `T2b-github-reads.md` (A) · `T2c-sync-job.md` (B) · `T2d-tree-page.md` (F) |
+| 3 | 3 + 4 | `T3a-merged-detection.md` (T) · `T3b-merged-in-sync.md` (B) · `T4-compare-with.md` (F) |
+| 4 | 5 | `T5a-webhooks.md` (A) · `T5b-live-sync.md` (B) · `T5c-live-page.md` (F) |
+| 5 | 6 | `T6a-engine-scale.md` (T) · `T6b-page-scale.md` (F) |
+| 6 | 7 | `T7-integrate-deploy.md` (integration) |
+| 7 (optional) | 8 | `T8a-snapshots.md` (B) · `T8b-time-travel-ui.md` (F) |
+
+```bash
+cd "/home/viris/Documents/Claude Setup/AI github" && git pull
+git worktree add ../app-t0 -b feat/t0-contracts
+git worktree add ../app-t1 -b feat/t1-graph-engine
+git worktree add ../app-t2a -b feat/t2a-infra
+for d in t0 t1 t2a; do cp .env "../app-$d/.env"; done
+cd "/home/viris/Documents/Claude Setup/app-t0" && pnpm install && claude
+```
+First message to each agent (swap the task file):
+> Read CLAUDE.md, docs/tech-stack.md, tasks/T-branch-tree.md and tasks/T0-contracts.md. Do only your task,
+> only inside the paths your task file lists. Run the tests, then open a PR listing your `// VERIFY:` items.
+
 ## Clean up
 ```bash
 git worktree remove ../app-A
