@@ -381,6 +381,18 @@ describe('tree API', () => {
     expect(TreeSnapshotSchema.parse(snapshot()).branches).toHaveLength(2);
   });
 
+  it('defaults merged.mergeCommitSha to null and accepts a full SHA', () => {
+    const merged = { via: 'pr', prNumber: 1, method: 'squash', into: 'main', newCommits: 0 };
+    expect(BranchNodeSchema.parse(node({ merged })).merged?.mergeCommitSha).toBeNull();
+    expect(
+      BranchNodeSchema.parse(node({ merged: { ...merged, mergeCommitSha: sha(3) } })).merged
+        ?.mergeCommitSha,
+    ).toBe(sha(3));
+    expect(
+      BranchNodeSchema.safeParse(node({ merged: { ...merged, mergeCommitSha: 'abc' } })).success,
+    ).toBe(false);
+  });
+
   it('rejects unknown why, ci, merged.via and bad SHAs', () => {
     expect(BranchNodeSchema.safeParse(node({ why: 'manual' })).success).toBe(false);
     expect(BranchNodeSchema.safeParse(node({ ci: 'error' })).success).toBe(false);

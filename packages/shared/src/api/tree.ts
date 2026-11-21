@@ -35,6 +35,11 @@ export const BranchMergedSchema = z.object({
   into: BranchName,
   /** Commits on the branch after the PR's head at merge time (`rev-list --count <pr.headSha>..B`). */
   newCommits: z.number().int().nonnegative(),
+  /**
+   * The PR's `merge_commit_sha` (via = 'pr'): the merge commit, the squash commit, or the last rebased
+   * commit. The page draws it as a square when `method = 'squash'`. Defaults to null for older snapshots.
+   */
+  mergeCommitSha: Sha.nullable().default(null),
 });
 
 export const BranchPrSchema = z.object({
