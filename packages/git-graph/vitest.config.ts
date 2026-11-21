@@ -7,5 +7,7 @@ export default defineConfig({
     // The oracle suite builds real git repos in temp dirs.
     testTimeout: 60_000,
     hookTimeout: 60_000,
+    // bench/scale.bench.ts measures retained memory after a GC
+    poolOptions: { forks: { execArgv: ['--expose-gc'] } },
   },
 });

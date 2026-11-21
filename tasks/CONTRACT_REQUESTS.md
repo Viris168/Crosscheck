@@ -228,6 +228,16 @@ local workaround. The owner applies approved changes on `main`; then rebase.
   `useTree` reads it into a client-only `TreeData.liveEvents`. Drop the header once this lands.
 - **Status:** requested
 
+### [Task T6a] "Not computed" sentinel for ahead/behind (lazy table)
+- **Change:** in `BranchNodeSchema` (`packages/shared/src/api/tree.ts`) allow `-1` for `ahead` and `behind`:
+  `z.number().int().min(-1)` with the doc comment "-1 = not computed (lazy table, `buildSnapshot({ visible })`);
+  `mergeBase` is then null". `CompareResponse` stays nonnegative.
+- **Why:** T6a's `buildSnapshot({ visible })` computes ahead/behind/mergeBase only for visible rows and their
+  compare-with chains; the rest get `NOT_COMPUTED = -1` from `@app/git-graph`. T6b sends `visible` and
+  shows "…" for -1 rows.
+- **Workaround in use:** none in `@app/git-graph` (it only produces the values). Until this lands, a snapshot
+  built with `visible` fails `TreeSnapshotSchema.parse`, so callers must not store/validate a lazy
+  snapshot (store the full one; build lazy ones per request).
 ### [Task T6b] `visible` on `GetTreeQuery`
 - **Change:** `visible: z.array(BranchName).max(200).optional()` on `GetTreeQuery` (`packages/shared/src/api/tree.ts`),
   sent as a repeated query key (`?visible=a&visible=b`).
