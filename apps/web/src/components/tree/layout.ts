@@ -142,10 +142,11 @@ export function whyShort(b: Pick<BranchNode, 'why' | 'whyPr' | 'ambiguous'>): st
   }
 }
 
-export function whyLong(b: BranchNode): string {
+/** `canEdit`: the "Compare with" select is shown below, as in the prototype ("Set by hand below."). */
+export function whyLong(b: BranchNode, canEdit = false): string {
   switch (b.why) {
     case 'override':
-      return 'Set by hand.';
+      return canEdit ? 'Set by hand below.' : 'Set by hand.';
     case 'pr': {
       const state: PullRequestState | undefined =
         b.pr && b.pr.number === b.whyPr ? b.pr.state : undefined;
@@ -224,10 +225,15 @@ export type TreeLayout = {
   rows: Row[];
 };
 
-/**
- * Prototype `renderTree` geometry. `squashShas`: commits to draw as squares. The snapshot does not
- * mark squash commits yet (see tasks/CONTRACT_REQUESTS.md), so callers pass an empty set for now.
- */
+/** Squash commits to draw as squares: `merged.mergeCommitSha` of branches merged by squash. */
+export function squashShas(snapshot: TreeSnapshot): Set<string> {
+  const out = new Set<string>();
+  for (const b of snapshot.branches)
+    if (b.merged?.method === 'squash' && b.merged.mergeCommitSha) out.add(b.merged.mergeCommitSha);
+  return out;
+}
+
+/** Prototype `renderTree` geometry. `squashShas`: commits to draw as squares (see `squashShas`). */
 export function layoutTree(
   snapshot: TreeSnapshot,
   graph: TreeGraph,

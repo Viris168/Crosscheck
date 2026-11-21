@@ -91,6 +91,13 @@ describe('BranchTree with the seed snapshot', () => {
     expect(within(row).getByText('same commit as main')).toBeTruthy();
   });
 
+  it('draws the squash merge commit as a square', async () => {
+    serve(tree());
+    render();
+    const c4 = await screen.findByRole('button', { name: /^Commit c4c4c4c/ });
+    expect(c4.getAttribute('data-shape')).toBe('squash');
+  });
+
   it('draws heads with a double ring and merge commits filled', async () => {
     serve(tree());
     render();
@@ -194,5 +201,111 @@ describe('BranchTree states', () => {
     serve(tree({}, seedSnapshot({ truncated: true })));
     render();
     expect(await screen.findByText(/only part of its history is drawn/)).toBeTruthy();
+  });
+});
+
+describe('Compare with (T4)', () => {
+  /** GET → `body`; PUT /compare-with → `put()` (call it to control timing). */
+  function serveEdit(body: GetTreeResponse, put: () => Promise<Response>) {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'PUT' ? put() : Response.json(body),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+  const select = () =>
+    screen.getByRole('combobox', { name: 'Compare feature/login-oauth with' }) as HTMLSelectElement;
+
+  it('shows the why label in each row and the long form in the details', async () => {
+    serve(tree());
+    render();
+    expect((await waitFor(() => branchRow('dev'))).getAttribute('aria-label')).toContain(
+      'vs main · guess',
+    );
+    await userEvent.click(branchRow('chore/readme'));
+    expect(
+      within(screen.getByRole('complementary')).getByText('Target of PR #1 (merged).'),
+    ).toBeTruthy();
+  });
+
+  it('is hidden without write access and for the default branch', async () => {
+    serve(tree());
+    render();
+    await userEvent.click(await waitFor(() => branchRow('feature/login-oauth')));
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('lists Automatic + every other branch; default branch has no select', async () => {
+    serve(tree({ canEdit: true }));
+    render();
+    await userEvent.click(await waitFor(() => branchRow('main')));
+    expect(screen.queryByRole('combobox')).toBeNull();
+    await userEvent.click(branchRow('feature/login-oauth'));
+    expect([...select().options].map((o) => o.text)).toEqual([
+      'Automatic (PR target, record or guess)',
+      'main',
+      'chore/readme',
+      'dev',
+      'feature/login',
+      'hotfix/header',
+    ]);
+    expect(select().value).toBe('');
+  });
+
+  it('updates optimistically, then takes the server answer', async () => {
+    let answer!: (r: Response) => void;
+    const oauth = seedBranches.find((b) => b.name === 'feature/login-oauth')!;
+    const saved = { ...oauth, compareWith: 'feature/login', why: 'override' as const, ahead: 1 };
+    let body = tree({ canEdit: true });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'PUT' ? new Promise<Response>((r) => (answer = r)) : Response.json(body),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render();
+    await userEvent.click(await waitFor(() => branchRow('feature/login-oauth')));
+    await userEvent.selectOptions(select(), 'feature/login');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/repos/r1/tree/compare-with',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ branch: 'feature/login-oauth', compareWith: 'feature/login' }),
+      }),
+    );
+    await waitFor(() =>
+      expect(branchRow('feature/login-oauth').getAttribute('aria-label')).toContain(
+        'vs feature/login · set by hand',
+      ),
+    );
+    expect(screen.getByText('Set by hand below.')).toBeTruthy();
+
+    // The server stored it: later GETs (the refetch after the mutation) include it too.
+    body = tree(
+      { canEdit: true },
+      seedSnapshot({ branches: seedBranches.map((b) => (b.name === oauth.name ? saved : b)) }),
+    );
+    answer(Response.json({ branch: saved }));
+    await waitFor(() =>
+      expect(branchRow('feature/login-oauth').getAttribute('aria-label')).toContain(
+        'ahead 1 behind 1 vs feature/login · set by hand',
+      ),
+    );
+  });
+
+  it('rolls back and explains when the server refuses (loop)', async () => {
+    serveEdit(tree({ canEdit: true }), async () =>
+      Response.json(
+        { error: { code: 'bad_request', message: 'That would make a loop.' } },
+        { status: 400 },
+      ),
+    );
+    render();
+    await userEvent.click(await waitFor(() => branchRow('feature/login-oauth')));
+    await userEvent.selectOptions(select(), 'feature/login');
+    expect(await screen.findByText('That would make a loop.')).toBeTruthy();
+    expect(branchRow('feature/login-oauth').getAttribute('aria-label')).toContain(
+      'ahead 3 behind 1 vs dev · guess',
+    );
+    expect(select().value).toBe('');
   });
 });
