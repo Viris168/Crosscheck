@@ -22,6 +22,9 @@ export function createFakeDb() {
     repo: [] as Row[],
     pullRequest: [] as Row[],
     review: [] as Row[],
+    gitEvent: [] as Row[],
+    branch: [] as Row[],
+    commitCi: [] as Row[],
   };
 
   const now = () => new Date();
@@ -208,6 +211,35 @@ export function createFakeDb() {
         const i = t.review.findIndex((r) => r.id === where.id);
         if (i < 0) throw new Error('not found');
         return t.review.splice(i, 1)[0];
+      },
+    },
+    gitEvent: {
+      create: async ({ data }: any) => {
+        if (t.gitEvent.some((e) => e.deliveryId === data.deliveryId)) throw uniqueViolation();
+        const row = { id: cuid('gev'), receivedAt: now(), ...data };
+        t.gitEvent.push(row);
+        return row;
+      },
+      findUnique: async ({ where }: any) =>
+        t.gitEvent.find((e) => e.deliveryId === where.deliveryId) ?? null,
+    },
+    branch: {
+      findFirst: async ({ where }: any) =>
+        t.branch.find(
+          (b) =>
+            b.repoId === where.repoId &&
+            b.headSha === where.headSha &&
+            (where.deletedAt !== null || b.deletedAt == null),
+        ) ?? null,
+    },
+    commitCi: {
+      upsert: async ({ where, create, update }: any) => {
+        const k = where.repoId_sha;
+        const hit = t.commitCi.find((c) => c.repoId === k.repoId && c.sha === k.sha);
+        if (hit) return Object.assign(hit, update, { updatedAt: now() });
+        const row = { updatedAt: now(), ...create };
+        t.commitCi.push(row);
+        return row;
       },
     },
   };

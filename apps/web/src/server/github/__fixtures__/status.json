@@ -1,0 +1,32 @@
+{
+  "id": 6001,
+  "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "name": "Acme/web",
+  "context": "ci/legacy",
+  "state": "pending",
+  "target_url": null,
+  "branches": [
+    {
+      "name": "main",
+      "commit": {
+        "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    }
+  ],
+  "commit": {
+    "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "repository": {
+    "id": 2001,
+    "full_name": "Acme/web",
+    "private": true
+  },
+  "installation": {
+    "id": 1001
+  },
+  "sender": {
+    "login": "bob",
+    "id": 7002,
+    "type": "User"
+  }
+}

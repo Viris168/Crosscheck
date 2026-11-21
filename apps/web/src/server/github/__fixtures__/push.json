@@ -1,0 +1,32 @@
+{
+  "ref": "refs/heads/main",
+  "before": "dddddddddddddddddddddddddddddddddddddddd",
+  "after": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "created": false,
+  "deleted": false,
+  "forced": false,
+  "base_ref": null,
+  "compare": "https://github.com/Acme/web/compare/x",
+  "commits": [
+    {
+      "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "distinct": true
+    }
+  ],
+  "head_commit": {
+    "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "repository": {
+    "id": 2001,
+    "full_name": "Acme/web",
+    "private": true
+  },
+  "installation": {
+    "id": 1001
+  },
+  "sender": {
+    "login": "bob",
+    "id": 7002,
+    "type": "User"
+  }
+}

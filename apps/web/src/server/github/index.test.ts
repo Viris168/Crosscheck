@@ -28,6 +28,12 @@ vi.mock('@app/db', () => ({
 }));
 vi.mock('@/server/jobs', () => ({ inngest: { send: h.send } }));
 vi.mock('./membership', () => ({ syncUserMemberships: h.syncUserMemberships }));
+// Review-path tests count `inngest.send` calls; the pull_request tree event is covered in
+// tree-events.test.ts.
+vi.mock('./tree-events', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  withTreeEvent: (review: unknown) => review,
+}));
 vi.mock('@/server/redis', () => ({
   getRedis: () => ({
     set: async (key: string, value: string, _ex: string, _ttl: number, nx: string) => {

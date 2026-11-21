@@ -21,3 +21,4 @@ export {
   type SyncOptions,
   type SyncResult,
 } from './membership';
+export { type GitEventKind, type WebhookContext } from './tree-events';

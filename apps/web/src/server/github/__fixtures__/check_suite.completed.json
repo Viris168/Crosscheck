@@ -1,0 +1,24 @@
+{
+  "action": "completed",
+  "check_suite": {
+    "id": 5001,
+    "head_branch": "main",
+    "head_sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "status": "completed",
+    "conclusion": "success",
+    "pull_requests": []
+  },
+  "repository": {
+    "id": 2001,
+    "full_name": "Acme/web",
+    "private": true
+  },
+  "installation": {
+    "id": 1001
+  },
+  "sender": {
+    "login": "bob",
+    "id": 7002,
+    "type": "User"
+  }
+}
