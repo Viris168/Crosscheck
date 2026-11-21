@@ -9,9 +9,10 @@
     "./testing": "./src/testing/index.ts"
   },
   "scripts": {
-    "lint": "eslint src test",
+    "lint": "eslint src test bench",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench": "vitest bench --run"
   },
   "dependencies": {
     "@app/shared": "workspace:*"
