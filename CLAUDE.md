@@ -34,6 +34,7 @@ All `apps/web/src/...` paths below are relative to the repo root.
 | `packages/scoring/`, `packages/github-comments/` | E — Scoring + comments |
 | `apps/web/src/app/` (pages + dashboard API routes, except the API folders owned above), `apps/web/src/components/`, `apps/web/src/hooks/`, `apps/web/src/lib/` | F — Frontend |
 | `infra/`, `.github/workflows/`, `docs/deploy.md` | G — Infra |
+| `packages/git-graph/` | T — Branch tree engine |
 
 **Rules**
 1. Only edit files inside the paths your task owns.
@@ -60,6 +61,8 @@ All `apps/web/src/...` paths below are relative to the repo root.
 - Never send to an AI provider: `.env*`, `*.pem`, `*.key`, lockfiles, files matching repo ignore settings.
 - Inngest event payloads carry ids only — never code, patches or tokens.
 - Every dashboard route checks the Better Auth session **and** org membership for the requested resource.
+- Branch tree: commits-only clones live in `REPO_CACHE_DIR`; file contents only in throwaway workspaces
+  (see `tasks/T-branch-tree.md` → "Privacy rules").
 
 ## Commands
 ```bash

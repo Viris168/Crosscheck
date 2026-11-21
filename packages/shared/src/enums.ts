@@ -50,3 +50,21 @@ export const ACTION_PROVIDERS = [
 export function isActionProvider(id: ProviderId): boolean {
   return (ACTION_PROVIDERS as readonly ProviderId[]).includes(id);
 }
+
+// --- branch tree (tasks/T-branch-tree.md); mirror the Prisma enums ---
+
+/** Status of a repo's commits-only clone + snapshot (`RepoGraph.status`). */
+export const TreeSyncStatus = ['idle', 'syncing', 'ready', 'failed'] as const;
+export type TreeSyncStatus = (typeof TreeSyncStatus)[number];
+
+/** Combined check runs + commit statuses for one commit. */
+export const CiState = ['success', 'failure', 'pending', 'neutral', 'none'] as const;
+export type CiState = (typeof CiState)[number];
+
+/** How a branch was detected as merged: a merged PR, or its content found in the target. */
+export const MergedVia = ['pr', 'rebased', 'squashed'] as const;
+export type MergedVia = (typeof MergedVia)[number];
+
+/** Which compare-with rule picked a branch's target (first match wins, in this order). */
+export const CompareWhy = ['override', 'pr', 'recorded', 'inferred', 'default'] as const;
+export type CompareWhy = (typeof CompareWhy)[number];

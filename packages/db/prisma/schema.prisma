@@ -73,6 +73,29 @@ enum PullRequestState {
   merged
 }
 
+// Branch tree (tasks/T-branch-tree.md)
+
+enum TreeSyncStatus {
+  idle
+  syncing
+  ready
+  failed
+}
+
+enum CiState {
+  success
+  failure
+  pending
+  neutral
+  none
+}
+
+enum MergedVia {
+  pr
+  rebased
+  squashed
+}
+
 // ---------------------------------------------------------------- Better Auth (core)
 
 model User {
@@ -241,6 +264,8 @@ model Repo {
   updatedAt       DateTime     @updatedAt
 
   pullRequests PullRequest[]
+  graph        RepoGraph?
+  branches     Branch[]
 
   @@index([orgId])
   @@index([installationId])
@@ -248,22 +273,27 @@ model Repo {
 }
 
 model PullRequest {
-  id           String           @id @default(cuid())
-  repoId       String
-  repo         Repo             @relation(fields: [repoId], references: [id], onDelete: Cascade)
-  number       Int
-  title        String
-  body         String?
-  author       String
-  state        PullRequestState @default(open)
-  headSha      String
-  baseRef      String
-  headRef      String
-  additions    Int              @default(0)
-  deletions    Int              @default(0)
-  changedFiles Int              @default(0)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  id             String           @id @default(cuid())
+  repoId         String
+  repo           Repo             @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  number         Int
+  title          String
+  body           String?
+  author         String
+  state          PullRequestState @default(open)
+  headSha        String
+  baseRef        String
+  headRef        String
+  additions      Int              @default(0)
+  deletions      Int              @default(0)
+  changedFiles   Int              @default(0)
+  /// branch tree: set when state = merged
+  mergedAt       DateTime?
+  mergeCommitSha String?
+  /// base branch SHA GitHub reported for this PR
+  baseSha        String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   reviews Review[]
 
@@ -338,4 +368,77 @@ model ProviderCredential {
 
   @@unique([orgId, userId, provider])
   @@index([userId])
+}
+
+// ---------------------------------------------------------------- branch tree (tasks/T-branch-tree.md)
+// SHAs, ref names, timestamps, PR numbers and CI states only. Never commit messages, author emails,
+// trees, blobs, diffs or patches.
+
+/// One per repo: status of the commits-only clone + the last snapshot.
+model RepoGraph {
+  repoId        String         @id
+  repo          Repo           @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  status        TreeSyncStatus @default(idle)
+  errorCode     ErrorCode?
+  defaultBranch String?
+  syncedAt      DateTime?
+  /// TreeSnapshot from @app/shared (no messages, no contents)
+  snapshot      Json?
+  updatedAt     DateTime       @updatedAt
+}
+
+model Branch {
+  id              String    @id @default(cuid())
+  repoId          String
+  repo            Repo      @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  name            String
+  headSha         String
+  isDefault       Boolean   @default(false)
+  /// milestone 5: branches whose head was this branch's first commit when the push webhook saw it created
+  recordedParents String[]  @default([])
+  recordedAt      DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([repoId, name])
+  @@index([repoId, deletedAt])
+}
+
+/// CI per commit, only for branch heads and PR heads.
+model CommitCi {
+  repoId    String
+  sha       String
+  state     CiState
+  /// counts by state from check runs + commit statuses
+  counts    Json
+  updatedAt DateTime @updatedAt
+
+  @@id([repoId, sha])
+}
+
+model CompareOverride {
+  repoId      String
+  branchName  String
+  compareWith String
+  setByUserId String
+  createdAt   DateTime @default(now())
+
+  @@id([repoId, branchName])
+}
+
+/// Milestones 5 + 8; refs and SHAs only.
+model GitEvent {
+  id         String   @id @default(cuid())
+  repoId     String
+  deliveryId String   @unique
+  /// 'push' | 'branch_created' | 'branch_deleted' | 'force_push' | 'pull_request' | 'ci'
+  kind       String
+  ref        String?
+  before     String?
+  after      String?
+  prNumber   Int?
+  receivedAt DateTime @default(now())
+
+  @@index([repoId, receivedAt])
 }

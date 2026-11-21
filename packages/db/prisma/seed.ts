@@ -1,7 +1,8 @@
-/* Dev seed: one org (+ owner), installation, repo, PR, and one review in each status.
+/* Dev seed: one org (+ owner), installation, repo, PR, one review in each status, and a branch tree.
  * Idempotent: deletes the seed rows (by fixed ids) and recreates them.
  * Run: pnpm db:seed */
-import { defaultRepoSettings, ReviewStatus } from '@app/shared';
+import { defaultRepoSettings, ReviewStatus, TreeSnapshotSchema } from '@app/shared';
+import type { BranchNode, CiState, TreeSnapshot } from '@app/shared';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../src/index';
 
@@ -70,6 +71,154 @@ const reviews: Record<ReviewStatus, Omit<Prisma.ReviewUncheckedCreateInput, 'pul
     status: 'cancelled',
     finishedAt: new Date(Date.now() - 10 * 60_000),
   },
+};
+
+// ---------------------------------------------------------------- branch tree
+// Mirrors the prototype's web-app demo (`seedWeb()` in docs/branch-tree/prototype.html). Made-up SHAs,
+// no commit messages (the snapshot never carries them). Lets lane F build the page before the sync job.
+//
+//   c1 ─ c2 ─ c3 ─ c4 (main) ─ d1 ─ d2 (dev)
+//          └ e1 (chore/readme, squashed into c4 by PR #1)
+//                      │       └ f1 ─ f2 ─ f3 (feature/login, PR #2 → dev)
+//                      │                └ b1 (feature/login-oauth)
+//                      └ a1 (hotfix/header, PR #3 → main, CI failing)
+const fakeSha = (tag: string) => tag.repeat(20);
+const C = {
+  c1: fakeSha('c1'),
+  c2: fakeSha('c2'),
+  e1: fakeSha('e1'),
+  c3: fakeSha('c3'),
+  c4: fakeSha('c4'),
+  d1: fakeSha('d1'),
+  d2: fakeSha('d2'),
+  f1: fakeSha('f1'),
+  f2: fakeSha('f2'),
+  f3: fakeSha('f3'),
+  b1: fakeSha('b1'),
+  a1: fakeSha('a1'),
+} as const;
+const commitOrder: [keyof typeof C, (keyof typeof C)[]][] = [
+  ['c1', []],
+  ['c2', ['c1']],
+  ['e1', ['c2']],
+  ['c3', ['c2']],
+  ['c4', ['c3']],
+  ['d1', ['c4']],
+  ['d2', ['d1']],
+  ['f1', ['d1']],
+  ['f2', ['f1']],
+  ['f3', ['f2']],
+  ['b1', ['f2']],
+  ['a1', ['c4']],
+];
+const T0 = Date.parse('2026-11-01T09:00:00Z');
+
+const base = {
+  isDefault: false,
+  whyPr: null,
+  ambiguous: null,
+  loop: false,
+  merged: null,
+  pr: null,
+  ci: 'none',
+  recorded: false,
+} satisfies Partial<BranchNode>;
+
+const treeBranches: BranchNode[] = [
+  {
+    ...base,
+    name: 'main',
+    headSha: C.c4,
+    isDefault: true,
+    compareWith: null,
+    why: 'default',
+    ahead: 0,
+    behind: 0,
+    mergeBase: null,
+    ci: 'success',
+  },
+  {
+    ...base,
+    name: 'chore/readme',
+    headSha: C.e1,
+    compareWith: 'main',
+    why: 'pr',
+    whyPr: 1,
+    ahead: 1,
+    behind: 2,
+    mergeBase: C.c2,
+    merged: { via: 'pr', prNumber: 1, method: 'squash', into: 'main', newCommits: 0 },
+    pr: { number: 1, state: 'merged', baseRef: 'main' },
+    ci: 'success',
+  },
+  {
+    // No PR, nothing recorded: inferred. Only long-lived candidate besides itself is main.
+    ...base,
+    name: 'dev',
+    headSha: C.d2,
+    compareWith: 'main',
+    why: 'inferred',
+    ahead: 2,
+    behind: 0,
+    mergeBase: C.c4,
+  },
+  {
+    ...base,
+    name: 'feature/login',
+    headSha: C.f3,
+    compareWith: 'dev',
+    why: 'pr',
+    whyPr: 2,
+    ahead: 3,
+    behind: 1,
+    mergeBase: C.d1,
+    pr: { number: 2, state: 'open', baseRef: 'dev' },
+    ci: 'success',
+  },
+  {
+    // Inferred. feature/login moved on (f3 is not in this branch), so it is not a candidate; of the
+    // long-lived ones, dev (3 ahead) beats main (4 ahead). Same result as the prototype's inferBase().
+    ...base,
+    name: 'feature/login-oauth',
+    headSha: C.b1,
+    compareWith: 'dev',
+    why: 'inferred',
+    ahead: 3,
+    behind: 1,
+    mergeBase: C.d1,
+  },
+  {
+    ...base,
+    name: 'hotfix/header',
+    headSha: C.a1,
+    compareWith: 'main',
+    why: 'pr',
+    whyPr: 3,
+    ahead: 1,
+    behind: 0,
+    mergeBase: C.c4,
+    pr: { number: 3, state: 'open', baseRef: 'main' },
+    ci: 'failure',
+  },
+];
+
+const treeSnapshot: TreeSnapshot = TreeSnapshotSchema.parse({
+  defaultBranch: 'main',
+  branches: treeBranches,
+  commits: commitOrder.map(([id, parents], i) => ({
+    sha: C[id],
+    parents: parents.map((p) => C[p]),
+    committedAt: new Date(T0 + i * 3_600_000).toISOString(),
+  })),
+  truncated: false,
+});
+
+const ciCounts: Record<CiState, Record<string, number>> = {
+  success: { success: 3 },
+  failure: { success: 2, failure: 1 },
+  pending: { pending: 1 },
+  neutral: { neutral: 1 },
+  none: {},
 };
 
 async function main() {
@@ -159,7 +308,34 @@ async function main() {
     ],
   });
 
-  console.warn(`Seeded org "acme" with ${ReviewStatus.length} reviews.`);
+  await prisma.repoGraph.create({
+    data: {
+      repoId: IDS.repo,
+      status: 'ready',
+      defaultBranch: treeSnapshot.defaultBranch,
+      syncedAt: new Date(),
+      snapshot: treeSnapshot,
+    },
+  });
+  await prisma.branch.createMany({
+    data: treeBranches.map((b) => ({
+      repoId: IDS.repo,
+      name: b.name,
+      headSha: b.headSha,
+      isDefault: b.isDefault,
+    })),
+  });
+  // CommitCi has no relation to Repo (no cascade), so clear it by repoId first.
+  await prisma.commitCi.deleteMany({ where: { repoId: IDS.repo } });
+  await prisma.commitCi.createMany({
+    data: treeBranches
+      .filter((b) => b.ci !== 'none')
+      .map((b) => ({ repoId: IDS.repo, sha: b.headSha, state: b.ci, counts: ciCounts[b.ci] })),
+  });
+
+  console.warn(
+    `Seeded org "acme" with ${ReviewStatus.length} reviews and ${treeBranches.length} branches.`,
+  );
 }
 
 main()

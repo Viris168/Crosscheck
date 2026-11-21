@@ -4,16 +4,48 @@ import {
   eventSchemas,
   ReviewFinalizeEvent,
   ReviewRequestedEvent,
+  TreeRefsChangedEvent,
+  TreeSyncRequestedEvent,
   UserSignedInEvent,
 } from './events';
 
 describe('events', () => {
-  it('defines exactly the review and sign-in events', () => {
+  it('defines exactly the review, sign-in and branch tree events', () => {
     expect(Object.keys(events).sort()).toEqual([
       'review/finalize',
       'review/requested',
+      'tree/refs-changed',
+      'tree/sync-requested',
       'user/signed-in',
     ]);
+  });
+
+  it('tree/sync-requested needs repoId, orgId and a known reason; carries ids only', () => {
+    for (const reason of ['manual', 'first_view', 'webhook', 'cron']) {
+      expect(TreeSyncRequestedEvent.parse({ repoId: 'r1', orgId: 'o1', reason })).toEqual({
+        repoId: 'r1',
+        orgId: 'o1',
+        reason,
+      });
+    }
+    expect(
+      TreeSyncRequestedEvent.parse({ repoId: 'r1', orgId: 'o1', reason: 'cron', token: 'ghs_x' }),
+    ).toEqual({ repoId: 'r1', orgId: 'o1', reason: 'cron' });
+    expect(TreeSyncRequestedEvent.safeParse({ repoId: 'r1', orgId: 'o1' }).success).toBe(false);
+    expect(
+      TreeSyncRequestedEvent.safeParse({ repoId: 'r1', orgId: 'o1', reason: 'push' }).success,
+    ).toBe(false);
+    expect(TreeSyncRequestedEvent.safeParse({ orgId: 'o1', reason: 'manual' }).success).toBe(false);
+  });
+
+  it('tree/refs-changed needs repoId, orgId, eventId; carries ids only', () => {
+    expect(
+      TreeRefsChangedEvent.parse({ repoId: 'r1', orgId: 'o1', eventId: 'e1', commits: ['abc'] }),
+    ).toEqual({ repoId: 'r1', orgId: 'o1', eventId: 'e1' });
+    expect(TreeRefsChangedEvent.safeParse({ repoId: 'r1', orgId: 'o1' }).success).toBe(false);
+    expect(TreeRefsChangedEvent.safeParse({ repoId: 'r1', orgId: 'o1', eventId: '' }).success).toBe(
+      false,
+    );
   });
 
   it('user/signed-in needs a userId and carries ids only', () => {
@@ -44,5 +76,7 @@ describe('eventSchemas', () => {
     expect(eventSchemas['review/requested']).toBe(events['review/requested'].data);
     expect(eventSchemas['review/finalize']).toBe(events['review/finalize'].data);
     expect(eventSchemas['user/signed-in']).toBe(events['user/signed-in'].data);
+    expect(eventSchemas['tree/sync-requested']).toBe(events['tree/sync-requested'].data);
+    expect(eventSchemas['tree/refs-changed']).toBe(events['tree/refs-changed'].data);
   });
 });

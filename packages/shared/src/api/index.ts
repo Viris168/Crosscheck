@@ -7,3 +7,4 @@ export * from './reviews';
 export * from './orgs';
 export * from './ingest';
 export * from './connections';
+export * from './tree';

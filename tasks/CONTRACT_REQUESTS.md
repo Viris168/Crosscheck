@@ -171,3 +171,40 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Workaround in use:** `apps/web/src/lib/server/access.ts` throws
   `new HttpError('github_error' as ApiErrorCode, …, 502)`; drop the cast once this lands.
 - **Status:** applied (PR fix/shared-github-error-code; cast removed from `access.ts`)
+
+### [Task T] Branch tree Prisma models + `PullRequest` merge fields
+- **Change:** enums `TreeSyncStatus`, `CiState`, `MergedVia`; models `RepoGraph`, `Branch`, `CommitCi`,
+  `CompareOverride`, `GitEvent` (back-relations `Repo.graph`, `Repo.branches`); `PullRequest` gains
+  `mergedAt`, `mergeCommitSha`, `baseSha`. Migration `t_branch_tree`.
+- **Why:** `tasks/T-branch-tree.md` → "Contracts → Prisma".
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/t0-contracts)
+
+### [Task T] Branch tree enums
+- **Change:** `TreeSyncStatus`, `CiState`, `MergedVia`, `CompareWhy` in `packages/shared/src/enums.ts`.
+- **Why:** shared by the engine, sync job and page; mirror the Prisma enums.
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/t0-contracts)
+
+### [Task T] Events `tree/sync-requested` + `tree/refs-changed`
+- **Change:** `'tree/sync-requested': { repoId, orgId, reason: 'manual'|'first_view'|'webhook'|'cron' }` and
+  `'tree/refs-changed': { repoId, orgId, eventId }` in `events` and `eventSchemas`.
+- **Why:** sync job (T2c) and live updates (T5a/T5b). Ids only.
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/t0-contracts)
+
+### [Task T] Tree API schemas (`packages/shared/src/api/tree.ts`)
+- **Change:** `TreeParams`, `BranchNodeSchema`, `TreeSnapshotSchema`, `GetTreeQuery`, `GetTreeResponse`,
+  `SyncTreeResponse`, `SetCompareWithBody`, `SetCompareWithResponse`, `CompareQuery`, `CompareResponse`
+  (+ `Sha`, `BranchName`, `TREE_MAX_*` caps). Exported from `@app/shared` and `@app/shared/client`.
+- **Why:** the four tree endpoints in the T-spec.
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/t0-contracts)
+
+### [Task T] `REPO_CACHE_DIR` env + seed tree
+- **Change:** `REPO_CACHE_DIR=./.cache/repos` in `.env.example` and `apps/web/src/server/env.ts` (optional,
+  defaulted); `.cache/` in `.gitignore`. Seed repo gets a `ready` `RepoGraph` mirroring the prototype's
+  web-app demo, plus `Branch` and `CommitCi` rows.
+- **Why:** T2a/T2c need the cache dir; F builds the page (T2d) before the sync job exists.
+- **Workaround in use:** none.
+- **Status:** applied (PR feat/t0-contracts)

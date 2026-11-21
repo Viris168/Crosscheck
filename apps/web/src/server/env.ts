@@ -12,6 +12,8 @@ const base64Key32 = z.string().refine((v) => Buffer.from(v, 'base64').length ===
   message: 'must be 32 bytes, base64-encoded (openssl rand -base64 32)',
 });
 
+export const DEFAULT_REPO_CACHE_DIR = './.cache/repos';
+
 export const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -34,6 +36,8 @@ export const EnvSchema = z
     OPENAI_API_KEY: optional(z.string()),
     CHATGPT_OAUTH_CLIENT_ID: optional(z.string()),
     CHATGPT_OAUTH_CLIENT_SECRET: optional(z.string()),
+    /** Commits-only clones for the branch tree (tasks/T-branch-tree.md). */
+    REPO_CACHE_DIR: z.preprocess(emptyToUndefined, z.string().default(DEFAULT_REPO_CACHE_DIR)),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;
