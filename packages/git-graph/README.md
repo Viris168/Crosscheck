@@ -1,5 +1,20 @@
 # @app/git-graph
 
+## Performance budget (T6a, milestone 6)
+
+Written before optimizing. Target repo: **500 branches, 50 000 commits** (generated, `bench/generate.ts`),
+on the **2 vCPU / 4 GB VPS** profile. The engine is single-threaded, so one core is what counts.
+
+| Operation | Budget |
+|---|---|
+| `readCommitGraph` (real git, all 500 refs) | ≤ 2 s |
+| `buildSnapshot({ visible })`, ~40 visible rows | ≤ 300 ms |
+| one `aheadBehind` / `compare` | ≤ 20 ms |
+| peak memory (graph + snapshot) | ≤ 300 MB |
+
+Measured with `pnpm --filter @app/git-graph bench` (`bench/scale.bench.ts`); results under
+"Benchmark results" below.
+
 Branch tree engine (lane T). Spec: `tasks/T-branch-tree.md`; behavior ported from
 `docs/branch-tree/prototype.html` (`reach`, `aheadBehind`, `equivalence`, `contentMerged`, `prMerge`,
 `closest`, `inferBase`, `chooseBase`, `compareMap`, `branchOrder`).
