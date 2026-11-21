@@ -4,7 +4,8 @@ import { canEditRepo, requireRepoAccess } from '@/lib/server/access';
 import { json, queryOf, route } from '@/lib/server/http';
 import { requireSession } from '@/server/auth';
 import { logger } from '@/server/logger';
-import { withOverrides } from './overrides';
+import { etagMatches, LIVE_EVENTS_HEADER, treeEtag } from './etag';
+import { loadOverrides, withOverrides } from './overrides';
 import {
   FIRST_VIEW_WINDOW_SECONDS,
   firstViewKey,
@@ -15,7 +16,13 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/repos/:repoId/tree — the stored snapshot; the first view of a repo starts a sync. */
+/** Browsers must revalidate (the page polls with If-None-Match); never shared caches. */
+const CACHE_CONTROL = 'private, no-cache';
+
+/**
+ * GET /api/repos/:repoId/tree — the stored snapshot; the first view of a repo starts a sync.
+ * The page polls it every 3 s with `If-None-Match`; an unchanged tree answers 304 with no body (T5c).
+ */
 export const GET = route<{ repoId: string }>(async (req, params) => {
   const session = await requireSession(req);
   const { repoId } = TreeParams.parse(params);
@@ -34,13 +41,38 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
       const key = firstViewKey(repoId);
       await requestInSlot(key, () => requestTreeSync(repoId, repo.orgId, 'first_view'));
     }
-    return json(GetTreeResponse, {
-      status: 'syncing',
-      syncedAt: null,
-      errorCode: null,
-      snapshot: null,
-      canEdit,
-    });
+    return json(
+      GetTreeResponse,
+      {
+        status: 'syncing',
+        syncedAt: null,
+        errorCode: null,
+        snapshot: null,
+        canEdit,
+      },
+      { headers: { 'cache-control': CACHE_CONTROL } },
+    );
+  }
+
+  const [overrides, gitEvent] = await Promise.all([
+    loadOverrides(repoId),
+    prisma.gitEvent.findFirst({ where: { repoId }, select: { id: true } }),
+  ]);
+  const liveEvents = gitEvent !== null;
+  const etag = treeEtag({
+    syncedAt: graph.syncedAt,
+    updatedAt: graph.updatedAt,
+    canEdit,
+    overrides,
+    liveEvents,
+  });
+  const headers = {
+    etag,
+    'cache-control': CACHE_CONTROL,
+    [LIVE_EVENTS_HEADER]: liveEvents ? '1' : '0',
+  };
+  if (etagMatches(req.headers.get('if-none-match'), etag)) {
+    return new Response(null, { status: 304, headers });
   }
 
   // The snapshot is JSON written by the sync job; a shape we can't read is shown as a failed sync.
@@ -50,13 +82,17 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
   }
   const unreadable = parsed !== null && !parsed.success;
   // Overrides show right away: re-pick compare-with on the stored graph instead of waiting for a sync.
-  const snapshot = parsed?.success ? await withOverrides(repoId, parsed.data) : null;
+  const snapshot = parsed?.success ? await withOverrides(repoId, parsed.data, overrides) : null;
 
-  return json(GetTreeResponse, {
-    status: unreadable && graph.status !== 'syncing' ? 'failed' : graph.status,
-    syncedAt: graph.syncedAt?.toISOString() ?? null,
-    errorCode: unreadable ? (graph.errorCode ?? 'internal') : graph.errorCode,
-    snapshot,
-    canEdit,
-  });
+  return json(
+    GetTreeResponse,
+    {
+      status: unreadable && graph.status !== 'syncing' ? 'failed' : graph.status,
+      syncedAt: graph.syncedAt?.toISOString() ?? null,
+      errorCode: unreadable ? (graph.errorCode ?? 'internal') : graph.errorCode,
+      snapshot,
+      canEdit,
+    },
+    { headers },
+  );
 });
