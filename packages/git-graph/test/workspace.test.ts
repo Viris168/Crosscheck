@@ -140,6 +140,18 @@ d('merged-state detection: each merge kind, with and without a PR record', () =>
     expect(res.content.size).toBe(1);
     expect(res.skipped).toHaveLength(2);
   });
+
+  it('only: content-checks just the named branches; the rest still get rule 1', async () => {
+    const fx = allFixtures.rebaseMerge();
+    const { cache, auth } = setUp(fx);
+    const res = await detectMergedWithFallbacks(cache, auth, await graphInput(fx, cache, []), {
+      only: ['feature/rb-nopr'],
+    });
+    expect([...res.content.keys()]).toEqual(['feature/rb-nopr']);
+    expect(res.merged.get('feature/rb-nopr')?.via).toBe('rebased');
+    expect(res.merged.get('feature/rb')).toBeNull(); // not checked: no claim
+    expect(res.skipped).toEqual([]);
+  });
 });
 
 d('withContentWorkspace', () => {

@@ -27,6 +27,7 @@ export {
   prMerge,
   detectMerged,
   needsContentCheck,
+  inferMergeMethod,
   type BranchRef,
   type ContentFacts,
   type ContentFactsLookup,

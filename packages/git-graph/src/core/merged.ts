@@ -5,7 +5,7 @@
 import type { CommitGraph } from './graph';
 import type { PrRecord } from './compare-with';
 import { mergedByContent } from './equivalence';
-import type { BranchMerged } from '../types';
+import type { BranchMerged, MergeMethod } from '../types';
 
 export interface BranchRef {
   name: string;
@@ -61,7 +61,7 @@ export function detectMerged(input: DetectMergedInput): BranchMerged | null {
     return {
       via: 'pr',
       prNumber: m.pr.number,
-      method: m.pr.mergeMethod ?? null,
+      method: m.pr.mergeMethod ?? inferMergeMethod(graph, m.pr),
       into: m.pr.baseRef,
       newCommits: m.newCommits,
       mergeCommitSha: m.pr.mergeCommitSha ?? null,
@@ -83,6 +83,24 @@ export function detectMerged(input: DetectMergedInput): BranchMerged | null {
     newCommits: 0,
     mergeCommitSha: null,
   };
+}
+
+/**
+ * How GitHub merged a PR, from its `merge_commit_sha` in the commits-only graph (GitHub's PR API does not
+ * say). Two or more parents → `merge`. Otherwise a rebase merge writes every rebased commit with the same
+ * committer timestamp, so a first parent with the same timestamp → `rebase`; else `squash` (a one-commit
+ * rebase looks exactly like a squash). Null when the merge commit is not in the graph.
+ */
+// VERIFY: GitHub gives all commits of one rebase merge the same committer date (observed, not documented).
+export function inferMergeMethod(graph: CommitGraph, pr: PrRecord): MergeMethod | null {
+  const sha = pr.mergeCommitSha;
+  if (!sha || !graph.has(sha)) return null;
+  if (graph.isMerge(sha)) return 'merge';
+  const c = graph.commit(sha);
+  const parent = c.parents[0];
+  if (parent && graph.has(parent) && graph.commit(parent).committedAt === c.committedAt)
+    return 'rebase';
+  return 'squash';
 }
 
 /**

@@ -29,6 +29,11 @@ export interface DetectMergedOptions {
   perBranchTimeoutMs?: number;
   /** clone + config of the workspace (default 60 s) */
   setupTimeoutMs?: number;
+  /**
+   * Only these branches get the content check (e.g. the ones a cache has no answer for). The others
+   * still count for compare-with targets and rule 1. Default: every branch that needs it.
+   */
+  only?: readonly string[];
 }
 
 export interface DetectMergedResult {
@@ -56,6 +61,7 @@ export async function detectMergedWithFallbacks(
   const perBranch = opts.perBranchTimeoutMs ?? 10_000;
   const graph = input.graph instanceof CommitGraph ? input.graph : new CommitGraph(input.graph);
   const prs = input.prs ?? [];
+  const only = opts.only ? new Set(opts.only) : null;
   const choices = pickCompareWith({
     graph,
     defaultBranch: input.defaultBranch,
@@ -71,6 +77,7 @@ export async function detectMergedWithFallbacks(
 
   const todo = input.branches
     .filter((b) => b.name !== input.defaultBranch)
+    .filter((b) => !only || only.has(b.name))
     .filter((b) => needsContentCheck(graph, b, targetOf(b.name), prs))
     // newest heads first (most likely what people look at), then by name for a stable order
     .sort(

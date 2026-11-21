@@ -10,6 +10,7 @@ import {
   listPullRequestsForTree,
   splitFullName,
 } from '@app/github';
+import { detectMergedWithFallbacks } from '@app/git-graph/git';
 import { getProvider } from '@app/providers';
 import type { ProviderId, ReviewFile, ReviewIssue, ReviewProvider, RiskResult } from '@app/shared';
 import * as comments from '@app/github-comments';
@@ -17,9 +18,22 @@ import * as scoring from '@app/scoring';
 import { env } from '@/server/env';
 import { logger } from '@/server/logger';
 import { getRedis } from '@/server/redis';
-import { ensureClone, readCloneGraph, redisRepoLock, type GitAuth } from './repo-cache';
+import {
+  cloneDir,
+  ensureClone,
+  readCloneGraph,
+  redisRepoLock,
+  withRepoLock,
+  type GitAuth,
+} from './repo-cache';
 import { prismaJobsStore, type JobsStore } from './store';
-import { prismaTreeStore, type TreeSyncDeps } from './tree-sync';
+import {
+  prismaTreeStore,
+  redisTreeMerged,
+  type MergedDetectInput,
+  type MergedOutcome,
+  type TreeSyncDeps,
+} from './tree-sync';
 
 export interface PrRef {
   installationId: number;
@@ -164,7 +178,61 @@ export function realTreeSyncDeps(): TreeSyncDeps {
       readGraph: (repo, heads) =>
         readCloneGraph(repo, heads, { cacheDir, lock, lockWaitMs: TREE_LOCK_WAIT_MS }),
     },
+    merged: redisTreeMerged(getRedis(), async (repo, auth, input) =>
+      // Under the clone lock: the workspace is a `--shared` clone of the cache, so the cache must not be
+      // fetched/repacked while it is open.
+      withRepoLock(
+        lock,
+        repo.githubRepoId,
+        () =>
+          detectMerged(cloneDir(cacheDir, repo.githubRepoId), auth, input, {
+            maxBranches: MERGED_MAX_BRANCHES,
+            perBranchTimeoutMs: MERGED_BRANCH_TIMEOUT_MS,
+          }),
+        { waitMs: TREE_LOCK_WAIT_MS, ttlMs: MERGED_LOCK_TTL_MS },
+      ),
+    ),
     now: () => new Date(),
     log: logger,
   };
+}
+
+// --- merged state (T3b) ---
+
+/** Content checks per sync and per branch (tasks/T-branch-tree.md → "Merged-state rules"). */
+const MERGED_MAX_BRANCHES = 50;
+const MERGED_BRANCH_TIMEOUT_MS = 10_000;
+/** Lock TTL while the workspace is open: 50 branches × 10 s plus slack for the clone and fetch. */
+const MERGED_LOCK_TTL_MS = 15 * 60_000;
+
+/**
+ * T3a's `detectMergedWithFallbacks`, content-checking only `input.check` (the branches the Redis cache has
+ * no answer for). Returns, per checked branch, how it merged or null (checked, not merged). A branch left
+ * out (over the cap, timed out, failed) was not checked and is tried again next sync.
+ */
+async function detectMerged(
+  cacheGitDir: string,
+  auth: GitAuth,
+  input: MergedDetectInput,
+  opts: { maxBranches: number; perBranchTimeoutMs: number },
+): Promise<Map<string, MergedOutcome>> {
+  const res = await detectMergedWithFallbacks(
+    cacheGitDir,
+    auth,
+    {
+      defaultBranch: input.defaultBranch,
+      branches: input.branches,
+      graph: input.graph,
+      prs: input.prs,
+      overrides: input.overrides,
+    },
+    { ...opts, only: input.check.map((b) => b.name) },
+  );
+  const out = new Map<string, MergedOutcome>();
+  for (const b of input.check) {
+    if (!res.content.has(b.name)) continue;
+    const m = res.merged.get(b.name);
+    out.set(b.name, m && m.via !== 'pr' ? m.via : null);
+  }
+  return out;
 }
