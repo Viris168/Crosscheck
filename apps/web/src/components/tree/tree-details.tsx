@@ -3,8 +3,11 @@
 import type { BranchNode, TreeSnapshot } from '@app/shared/client';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { Select } from '@/components/ui/input';
+import { ComparePanel } from './compare-panel';
 import { CompareWithSelect } from './compare-with-select';
 import { branchesContaining, mergedLong, shortSha, whyLong, type TreeGraph } from './layout';
+import { isComputed } from './scale-contract';
 import { RECORDED_TIP, type Selection } from './tree-svg';
 
 const CI_TONE: Record<BranchNode['ci'], string> = {
@@ -69,6 +72,20 @@ export function TreeDetails({
       {shortSha(sha)}
     </button>
   );
+
+  if (selection.type === 'compare') {
+    return (
+      <ComparePanel
+        key={`${selection.a}\n${selection.b}`}
+        repoId={repoId}
+        snapshot={snapshot}
+        graph={graph}
+        a={selection.a}
+        b={selection.b}
+        onSelect={onSelect}
+      />
+    );
+  }
 
   if (selection.type === 'commit') {
     const c = graph.commit(selection.sha);
@@ -148,9 +165,15 @@ export function TreeDetails({
     if (b.compareWith)
       rows.push([
         `vs ${b.compareWith.length > 12 ? `${b.compareWith.slice(0, 11)}…` : b.compareWith}`,
-        <span key="ab" className="tabular-nums">
-          ↑{b.ahead} ahead, ↓{b.behind} behind
-        </span>,
+        isComputed(b) ? (
+          <span key="ab" className="tabular-nums">
+            ↑{b.ahead} ahead, ↓{b.behind} behind
+          </span>
+        ) : (
+          <span key="ab" className="text-muted-foreground">
+            counting…
+          </span>
+        ),
       ]);
     if (!b.isDefault) rows.push(['Merged?', mergedLong(b)]);
     rows.push([
@@ -186,6 +209,29 @@ export function TreeDetails({
         {canEdit && !b.isDefault && (
           <CompareWithSelect key={b.name} repoId={repoId} snapshot={snapshot} branch={b} />
         )}
+        <div className="mt-4 border-t pt-3">
+          <h3 className="mb-2 text-sm font-semibold">Compare with any branch</h3>
+          <Select
+            key={b.name}
+            aria-label={`Compare ${b.name} with any branch`}
+            value=""
+            onChange={(e) =>
+              e.target.value && onSelect({ type: 'compare', a: b.name, b: e.target.value })
+            }
+          >
+            <option value="">Pick a branch…</option>
+            {snapshot.branches
+              .filter((x) => x.name !== b.name)
+              .map((x) => (
+                <option key={x.name} value={x.name}>
+                  {x.name}
+                </option>
+              ))}
+          </Select>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Or Shift-click another branch in the tree.
+          </p>
+        </div>
       </>
     );
   }
@@ -207,7 +253,8 @@ export function TreeDetails({
       />
       <p className="mt-3 text-[13px] text-muted-foreground">
         Click a branch or commit in the tree (or Tab to it and press Enter) to see its details.
-        Enter on a branch with a pull request opens the PR.
+        Enter on a branch with a pull request opens the PR. Shift-click a second branch to compare
+        the two.
       </p>
     </>
   );

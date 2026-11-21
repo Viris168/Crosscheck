@@ -3,19 +3,36 @@
 import type { ErrorCode } from '@app/shared/client';
 import { RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { QueryError } from '@/components/query-error';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useSyncTree, useTree, type TreeData } from '@/hooks/use-tree';
+import { useSyncTree, useTree, VISIBLE_DEBOUNCE_MS, type TreeData } from '@/hooks/use-tree';
 import { ApiError } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { LastUpdated } from './last-updated';
-import { layoutTree, squashShas, TreeGraph } from './layout';
+import { fullRowWidth, layoutTree, squashShas, TreeGraph, type RowRange } from './layout';
 import { TreeDetails } from './tree-details';
-import { TreeSvg, type Selection } from './tree-svg';
+import {
+  TreeSvg,
+  VirtualTree,
+  type SelectOptions,
+  type Selection,
+  type Viewport,
+} from './tree-svg';
+import { TreeToolbar } from './tree-toolbar';
 import { useRowChanges } from './use-row-changes';
+import { useTreeView } from './use-tree-view';
+import { isFiltering, viewRows, type MatchContext, type ViewRow } from './view';
 
 // The prototype's colour tokens, as CSS variables scoped to the tree (light + `.dark`). Panel, text,
 // muted and border come from our theme (--card, --foreground, --muted-foreground, --border).
@@ -39,7 +56,14 @@ export const APP_PERMISSIONS_DOC =
   'https://docs.github.com/en/apps/using-github-apps/approving-updated-permissions-for-a-github-app';
 
 export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullName: string }) {
-  const tree = useTree(repoId);
+  // Branch names on screen (virtualized rows); GET /tree computes their counts if the snapshot lacks them.
+  const [visible, setVisibleState] = useState<readonly string[]>([]);
+  const setVisible = useCallback(
+    (next: readonly string[]) =>
+      setVisibleState((prev) => (prev.join('\n') === next.join('\n') ? prev : next)),
+    [],
+  );
+  const tree = useTree(repoId, { visible });
   const sync = useSyncTree(repoId);
 
   const syncError =
@@ -119,6 +143,7 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
           header={header(data)}
           repoId={repoId}
           repoFullName={repoFullName}
+          onVisible={setVisible}
         />
       ) : data.status === 'failed' ? null : (
         <Card>
@@ -130,29 +155,71 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
   );
 }
 
+const toggled = (set: ReadonlySet<string>, key: string) => {
+  const next = new Set(set);
+  if (!next.delete(key)) next.add(key);
+  return next;
+};
+
 function TreeBody({
   data,
   snapshot: latest,
   header,
   repoId,
   repoFullName,
+  onVisible,
 }: {
   data: TreeData;
   snapshot: NonNullable<TreeData['snapshot']>;
   header: ReactNode;
   repoId: string;
   repoFullName: string;
+  onVisible: (names: readonly string[]) => void;
 }) {
   const router = useRouter();
   const [selection, setSelection] = useState<Selection>({ type: 'repo' });
+  const [view, setView] = useTreeView();
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const [mergedOpen, setMergedOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const [runs, setRuns] = useState<ReadonlySet<string>>(() => new Set());
+  const [now] = useState(() => Date.now());
   // Live updates: draw the latest snapshot, animating rows whose head moved, new and deleted rows.
   const { shown: snapshot, changes } = useRowChanges(latest);
   const graph = useMemo(() => new TreeGraph(snapshot.commits), [snapshot]);
-  const layout = useMemo(
-    () => layoutTree(snapshot, graph, squashShas(snapshot)),
-    [snapshot, graph],
+  const squash = useMemo(() => squashShas(snapshot), [snapshot]);
+  const minePrs = data.minePrs;
+  const ctx = useMemo<MatchContext>(
+    () => ({
+      minePrs: new Set(minePrs ?? []),
+      headTime: (sha) => {
+        const t = Date.parse(graph.commit(sha)?.committedAt ?? '');
+        return Number.isFinite(t) ? t : null;
+      },
+      now,
+    }),
+    [minePrs, graph, now],
+  );
+  const rows = useMemo(
+    () => viewRows(snapshot, { view, ctx, collapsed, mergedOpen }),
+    [snapshot, view, ctx, collapsed, mergedOpen],
   );
   const repoName = repoFullName.split('/').pop() ?? repoFullName;
+  const filtering = isFiltering(view);
+  const matched = filtering
+    ? rows.filter((r) => r.kind === 'branch' && !r.context).length
+    : snapshot.branches.length;
+
+  const onSelect = useCallback((s: Selection, opts?: SelectOptions) => {
+    setSelection((cur) => {
+      if (opts?.compare && s.type === 'branch') {
+        if (cur.type === 'branch' && cur.name !== s.name)
+          return { type: 'compare', a: cur.name, b: s.name };
+        if (cur.type === 'compare' && cur.a !== s.name)
+          return { type: 'compare', a: cur.a, b: s.name };
+      }
+      return s;
+    });
+  }, []);
 
   const onEnter = (s: Selection) => {
     if (s.type !== 'branch') return false;
@@ -173,21 +240,47 @@ function TreeBody({
         )}
         <Card>
           {header}
+          {snapshot.branches.length > 1 && (
+            <TreeToolbar
+              view={view}
+              onChange={setView}
+              shown={matched}
+              total={snapshot.branches.length}
+            />
+          )}
           {snapshot.branches.length <= 1 && (
             <p className="mb-3 text-sm text-muted-foreground">
               Only the default branch so far. Other branches show up here once they are pushed.
             </p>
           )}
-          <div className="overflow-x-auto">
-            <TreeSvg
-              layout={layout}
-              repoName={repoName}
-              selection={selection}
-              onSelect={setSelection}
-              onEnter={onEnter}
-              changes={changes}
-            />
-          </div>
+          {filtering && rows.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No branches match. Try another name or fewer filters.
+            </p>
+          ) : (
+            <VirtualTree count={rows.length}>
+              {(r, viewport) => (
+                <TreeLayer
+                  snapshot={snapshot}
+                  graph={graph}
+                  squash={squash}
+                  rows={rows}
+                  runs={runs}
+                  range={r}
+                  viewport={viewport}
+                  onVisible={onVisible}
+                  repoName={repoName}
+                  selection={selection}
+                  onSelect={onSelect}
+                  onEnter={onEnter}
+                  onToggleSubtree={(n) => setCollapsed((c) => toggled(c, n))}
+                  onToggleMerged={(p) => setMergedOpen((m) => toggled(m, p))}
+                  onToggleRun={(n) => setRuns((x) => toggled(x, n))}
+                  changes={changes}
+                />
+              )}
+            </VirtualTree>
+          )}
           <Legend />
         </Card>
       </div>
@@ -197,7 +290,7 @@ function TreeBody({
             snapshot={snapshot}
             graph={graph}
             selection={selection}
-            onSelect={setSelection}
+            onSelect={onSelect}
             repoId={repoId}
             repoFullName={repoFullName}
             syncedAt={data.syncedAt}
@@ -207,6 +300,50 @@ function TreeBody({
       </aside>
     </div>
   );
+}
+
+/** Lays out only the rows in `range` (their commits are the costly part) and draws them. */
+function TreeLayer({
+  snapshot,
+  graph,
+  squash,
+  rows,
+  runs,
+  range,
+  viewport,
+  onVisible,
+  ...svg
+}: {
+  snapshot: NonNullable<TreeData['snapshot']>;
+  graph: TreeGraph;
+  squash: ReadonlySet<string>;
+  rows: ViewRow[];
+  runs: ReadonlySet<string>;
+  range: RowRange;
+  viewport: Viewport;
+  onVisible: (names: readonly string[]) => void;
+} & Omit<ComponentProps<typeof TreeSvg>, 'layout' | 'range' | 'viewport' | 'width'>) {
+  const { start, end } = range;
+  const layout = useMemo(
+    () => layoutTree(snapshot, graph, squash, { rows, expanded: runs, range: { start, end } }),
+    [snapshot, graph, squash, rows, runs, start, end],
+  );
+  // Rows on screen → useTree, once scrolling settles. A timer, not a state update during the scroll,
+  // so the virtualizer's flushSync renders never cascade into the parents.
+  const visibleKey = rows
+    .slice(start, end)
+    .flatMap((r) => (r.kind === 'branch' ? [r.branch.name] : []))
+    .join('\n');
+  useEffect(() => {
+    const t = setTimeout(
+      () => onVisible(visibleKey ? visibleKey.split('\n') : []),
+      VISIBLE_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(t);
+  }, [visibleKey, onVisible]);
+  // Virtualized: keep at least a full row's width so the canvas does not narrow while scrolling.
+  const width = end - start < rows.length ? Math.max(layout.width, fullRowWidth()) : layout.width;
+  return <TreeSvg layout={layout} range={range} viewport={viewport} width={width} {...svg} />;
 }
 
 function Card({ className = '', ...props }: ComponentProps<'section'>) {

@@ -1,13 +1,20 @@
 'use client';
 
 import {
-  GetTreeResponse,
+  CompareResponse,
   SetCompareWithResponse,
   SyncTreeResponse,
   type BranchNode,
+  type GetTreeResponse,
 } from '@app/shared/client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  isComputed,
+  LazyGetTreeResponse,
+  MINE_PRS_HEADER,
+  TREE_MAX_VISIBLE,
+} from '@/components/tree/scale-contract';
 import { ApiError, apiFetch } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 
@@ -19,6 +26,8 @@ export const TREE_IDLE_MS = 10 * 60_000;
 export const SYNC_GRACE_MS = 60_000;
 /** Response header set by GET /tree (workaround until `GetTreeResponse.liveEvents` lands). */
 export const LIVE_EVENTS_HEADER = 'x-tree-live-events';
+/** Rows on screen settle this long before they are reported to useTree (T6b; the tree layer waits). */
+export const VISIBLE_DEBOUNCE_MS = 150;
 
 /** What the page caches: the response plus the validator and the live-events signal (client only). */
 export type TreeData = GetTreeResponse & {
@@ -28,23 +37,45 @@ export type TreeData = GetTreeResponse & {
   liveEvents?: boolean | null;
   /** Set by a Refresh click: show "syncing" until the server changes or the grace period ends. */
   syncRequestedAt?: number;
+  /** PR numbers the viewer opened (the "mine" filter); from the last 200 response. */
+  minePrs?: number[];
 };
 
-const treeUrl = (repoId: string) => `/api/repos/${encodeURIComponent(repoId)}/tree`;
+/** True when some branch still has NOT_COMPUTED counts: only then is `visible` worth sending. */
+export const isLazy = (data: TreeData | undefined) =>
+  !!data?.snapshot?.branches.some((b) => !isComputed(b));
+
+export function treeUrl(repoId: string, visible: readonly string[] = []): string {
+  const base = `/api/repos/${encodeURIComponent(repoId)}/tree`;
+  if (!visible.length) return base;
+  const p = new URLSearchParams();
+  for (const v of visible.slice(0, TREE_MAX_VISIBLE)) p.append('visible', v);
+  return `${base}?${p}`;
+}
+
+const parseMine = (h: string | null) =>
+  (h ?? '')
+    .split(',')
+    .map(Number)
+    .filter((n) => Number.isSafeInteger(n) && n > 0);
 
 /**
  * GET /tree with `If-None-Match`: 304 keeps the cached object (same reference, so nothing re-renders).
  * A Refresh click's optimistic "syncing" is kept while the server answers 304, for up to SYNC_GRACE_MS;
  * after that the validator is dropped so the server's own state wins.
  */
-export async function fetchTree(repoId: string, cached: TreeData | undefined): Promise<TreeData> {
+export async function fetchTree(
+  repoId: string,
+  cached: TreeData | undefined,
+  visible: readonly string[] = [],
+): Promise<TreeData> {
   const expired =
     cached?.syncRequestedAt !== undefined && Date.now() - cached.syncRequestedAt >= SYNC_GRACE_MS;
   const etag = cached?.etag && !expired ? cached.etag : undefined;
   // `no-store`: the browser must not answer from (or update) its HTTP cache; we revalidate ourselves.
   // VERIFY: with an author-set If-None-Match, fetch hands the 304 to the page (Fetch spec, "HTTP-network-
   // or-cache fetch" skips cache revalidation when the request already has conditional headers).
-  const res = await fetch(treeUrl(repoId), {
+  const res = await fetch(treeUrl(repoId, visible), {
     cache: 'no-store',
     headers: { accept: 'application/json', ...(etag ? { 'if-none-match': etag } : {}) },
   });
@@ -53,12 +84,13 @@ export async function fetchTree(repoId: string, cached: TreeData | undefined): P
     throw new ApiError(304, 'http_error', 'Unexpected 304 for an unconditional request');
   }
   if (!res.ok) throw await ApiError.from(res);
-  const body = GetTreeResponse.parse(await res.json());
+  const body: GetTreeResponse = LazyGetTreeResponse.parse(await res.json());
   const live = res.headers.get(LIVE_EVENTS_HEADER);
   return {
     ...body,
     etag: res.headers.get('etag') ?? undefined,
     liveEvents: live === '1' ? true : live === '0' ? false : null,
+    minePrs: parseMine(res.headers.get(MINE_PRS_HEADER)),
   };
 }
 
@@ -110,14 +142,30 @@ export function useIdle(ms: number): boolean {
  * Branch tree snapshot, live (T5c): polls every 3 s while the tab is visible, with `If-None-Match`, so
  * an unchanged tree is a bodyless 304. Polling stops after 10 min without input and resumes (with an
  * immediate refetch) on focus. Polling, not websockets (stack rule).
+ *
+ * `visible` (T6b): branch names on screen (reported 150 ms after scrolling stops). Sent only while the snapshot has rows
+ * without counts (T6a lazy table), so the server computes just those; a full snapshot never sends it.
  */
-export function useTree(repoId: string) {
+export function useTree(repoId: string, opts: { visible?: readonly string[] } = {}) {
   const qc = useQueryClient();
   const idle = useIdle(TREE_IDLE_MS);
   const key = queryKeys.tree(repoId);
+  // Already debounced by the caller (the tree layer reports rows VISIBLE_DEBOUNCE_MS after scrolling).
+  const visibleKey = (opts.visible ?? []).join('\n');
+  const visible = useRef<readonly string[]>([]);
+  useEffect(() => {
+    visible.current = visibleKey ? visibleKey.split('\n') : [];
+    const data = qc.getQueryData<TreeData>(queryKeys.tree(repoId));
+    const byName = new Map(data?.snapshot?.branches.map((b) => [b.name, b]));
+    if (visible.current.some((n) => byName.has(n) && !isComputed(byName.get(n)!)))
+      void qc.refetchQueries({ queryKey: queryKeys.tree(repoId), exact: true });
+  }, [visibleKey, qc, repoId]);
   return useQuery({
     queryKey: key,
-    queryFn: () => fetchTree(repoId, qc.getQueryData<TreeData>(key)),
+    queryFn: () => {
+      const cached = qc.getQueryData<TreeData>(key);
+      return fetchTree(repoId, cached, isLazy(cached) ? visible.current : []);
+    },
     refetchInterval: (q) =>
       idle || (q.state.status === 'error' && !q.state.data) ? false : TREE_POLL_MS,
     refetchIntervalInBackground: false,
@@ -204,5 +252,22 @@ export function useSetCompareWith(repoId: string) {
       );
     },
     onSettled: () => qc.invalidateQueries({ queryKey: key }),
+  });
+}
+
+/**
+ * Any two branches (T6b): how far `a` is ahead of / behind `b` and their merge base. Not polled: the
+ * server caches by head SHAs, and a push changes the tree, which re-renders the panel's inputs.
+ */
+export function useTreeCompare(repoId: string, a: string | null, b: string | null) {
+  return useQuery({
+    queryKey: ['repos', repoId, 'tree-compare', a, b] as const,
+    enabled: !!a && !!b && a !== b,
+    staleTime: 30_000,
+    queryFn: () =>
+      apiFetch(
+        `/api/repos/${encodeURIComponent(repoId)}/tree/compare?${new URLSearchParams({ a: a!, b: b! })}`,
+        CompareResponse,
+      ),
   });
 }

@@ -2,6 +2,8 @@
 // `ownCommits`, `branchOrder`, `mergeNote`, `whyShort`, `whyLong`, `renderTree` geometry).
 // Works only on what the snapshot carries: SHAs, parents, commit times, refs, PR numbers, CI.
 import type { BranchNode, PullRequestState, TreeSnapshot } from '@app/shared/client';
+import { isComputed } from './scale-contract';
+import type { ViewRow } from './view';
 
 export const MAX_SHOWN = 7;
 export const METHOD = { merge: 'merge commit', squash: 'squash', rebase: 'rebase' } as const;
@@ -21,11 +23,16 @@ export const G = {
 export const short = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 export const shortSha = (sha: string) => sha.slice(0, 7);
 
+/** `reach` sets kept per graph: enough for a screen of rows and their compare-with targets. */
+const REACH_CACHE_MAX = 128;
+
 /** Commit index over the snapshot's commits (parents outside the snapshot are ignored). */
 export class TreeGraph {
   private readonly byId = new Map<string, TreeSnapshot['commits'][number]>();
   private readonly order = new Map<string, number>();
+  // Bounded: with 500 branches over 20k commits, one set per branch would hold millions of entries.
   private readonly reachCache = new Map<string, Set<string>>();
+  private childIndex: Map<string, string[]> | null = null;
 
   constructor(commits: TreeSnapshot['commits']) {
     commits.forEach((c, i) => {
@@ -58,6 +65,30 @@ export class TreeGraph {
       for (const p of c.parents) stack.push(p);
     }
     this.reachCache.set(sha, seen);
+    if (this.reachCache.size > REACH_CACHE_MAX)
+      this.reachCache.delete(this.reachCache.keys().next().value!);
+    return seen;
+  }
+
+  /** Every drawn commit that has `sha` in its history (inclusive). */
+  descendants(sha: string): Set<string> {
+    if (!this.childIndex) {
+      this.childIndex = new Map();
+      for (const c of this.byId.values())
+        for (const p of c.parents) {
+          const list = this.childIndex.get(p);
+          if (list) list.push(c.sha);
+          else this.childIndex.set(p, [c.sha]);
+        }
+    }
+    const seen = new Set<string>();
+    const stack = this.byId.has(sha) ? [sha] : [];
+    while (stack.length) {
+      const x = stack.pop()!;
+      if (seen.has(x)) continue;
+      seen.add(x);
+      for (const k of this.childIndex.get(x) ?? []) stack.push(k);
+    }
     return seen;
   }
 
@@ -187,10 +218,11 @@ export function mergeNote(b: BranchNode, byName: Map<string, BranchNode>): Note 
   return null;
 }
 
-/** "↑a ↓b vs X · why", or "default branch". */
+/** "↑a ↓b vs X · why", or "default branch". Counts the server has not computed yet show as "…". */
 export function subLine(b: BranchNode): string {
   if (!b.compareWith) return 'default branch';
-  return `↑${b.ahead} ↓${b.behind} vs ${short(b.compareWith, 14)} · ${whyShort(b)}`;
+  const [a, z] = isComputed(b) ? [b.ahead, b.behind] : ['…', '…'];
+  return `↑${a} ↓${z} vs ${short(b.compareWith, 14)} · ${whyShort(b)}`;
 }
 
 export function mergedLong(b: BranchNode): string {
@@ -206,7 +238,18 @@ export function mergedLong(b: BranchNode): string {
 }
 
 export type Item =
-  | { kind: 'more'; count: number; x: number }
+  | {
+      kind: 'more';
+      /** older commits hidden behind the chip (collapsed), or not drawn at all (expanded) */
+      count: number;
+      x: number;
+      /** chip width */
+      w: number;
+      /** the run is expanded: every drawn commit is shown and the chip folds them again */
+      expanded: boolean;
+      /** more commits are drawn than shown, so a click expands the run (else it selects the branch) */
+      expandable: boolean;
+    }
   | {
       kind: 'commit';
       sha: string;
@@ -216,14 +259,59 @@ export type Item =
       isSquash: boolean;
     };
 
-export type Row = { branch: BranchNode; y: number; items: Item[]; note: Note | null; sub: string };
+export type BranchRow = {
+  kind: 'branch';
+  branch: BranchNode;
+  y: number;
+  /** empty for rows outside the rendered range (computed lazily) */
+  items: Item[];
+  note: Note | null;
+  sub: string;
+  depth: number;
+  children: number;
+  collapsed: boolean;
+  context: boolean;
+};
+export type GroupRow = {
+  kind: 'merged';
+  parent: string;
+  names: string[];
+  expanded: boolean;
+  y: number;
+  depth: number;
+};
+export type Row = BranchRow | GroupRow;
 
 export type TreeLayout = {
   width: number;
   height: number;
   repoY: number;
   rows: Row[];
+  /** every branch in the snapshot (the repo node's label), not only the rows shown */
+  branchCount: number;
 };
+
+/** Row index range [start, end) whose commits are laid out and drawn. */
+export type RowRange = { start: number; end: number };
+
+/** Chip text: "… 120 commits" folded, "hide" when the run is expanded. */
+export const moreLabel = (it: { count: number; expanded: boolean }) =>
+  it.expanded ? 'hide' : `… ${it.count} commit${it.count === 1 ? '' : 's'}`;
+/** Approximate chip width for its label (12px text). */
+export const chipWidth = (label: string) => Math.max(36, Math.round(label.length * 6.8 + 18));
+
+export const rowY = (i: number) => G.TOP + 26 + i * G.RH;
+
+/** Width of a row with a wide "… N commits" chip and MAX_SHOWN commits (see `layoutTree`). */
+export const fullRowWidth = () =>
+  G.CX -
+  18 +
+  chipWidth(moreLabel({ count: 99_999, expanded: false })) +
+  G.STEP -
+  18 +
+  (MAX_SHOWN - 1) * G.STEP +
+  G.STEP +
+  20;
 
 /** Squash commits to draw as squares: `merged.mergeCommitSha` of branches merged by squash. */
 export function squashShas(snapshot: TreeSnapshot): Set<string> {
@@ -233,53 +321,110 @@ export function squashShas(snapshot: TreeSnapshot): Set<string> {
   return out;
 }
 
+export type LayoutOptions = {
+  /** rows to show (see `viewRows`); default: every branch in prototype order */
+  rows?: readonly ViewRow[];
+  /** branches whose linear run of older commits is expanded */
+  expanded?: ReadonlySet<string>;
+  /** only these rows get their commits laid out (virtualized list); default: all */
+  range?: RowRange;
+};
+
+/** Commits of one row: oldest → newest, head on the right; older ones fold into a chip. */
+export function rowItems(
+  graph: TreeGraph,
+  branch: BranchNode,
+  byName: Map<string, BranchNode>,
+  squash: ReadonlySet<string>,
+  expanded: boolean,
+): Item[] {
+  const { shas, total } = ownCommits(graph, branch, byName);
+  const shown = expanded ? shas : shas.slice(-MAX_SHOWN);
+  const hidden = total - shown.length;
+  const items: Item[] = [];
+  let x = G.CX;
+  if (hidden > 0 || (expanded && shas.length > MAX_SHOWN)) {
+    const expandable = shas.length > MAX_SHOWN;
+    const it = { count: hidden, expanded: expanded && expandable, expandable };
+    const w = chipWidth(moreLabel(it));
+    // Left edge where the prototype's 36px chip starts; the first commit keeps one STEP of gap.
+    const cx = x - 18 + w / 2;
+    items.push({ kind: 'more', ...it, x: cx, w });
+    x = cx + w / 2 + G.STEP - 18;
+  }
+  for (const sha of shown) {
+    const c = graph.commit(sha)!;
+    items.push({
+      kind: 'commit',
+      sha,
+      x,
+      isHead: sha === branch.headSha,
+      isMerge: c.parents.length > 1,
+      isSquash: squash.has(sha),
+    });
+    x += G.STEP;
+  }
+  return items;
+}
+
+const allRows = (snapshot: TreeSnapshot): ViewRow[] =>
+  branchOrder(snapshot).map((branch) => ({
+    kind: 'branch',
+    branch,
+    depth: depthOf(snapshot, branch.name),
+    children: 0,
+    collapsed: false,
+    context: false,
+  }));
+
+/** Centre of a row's last item (a chip counts by its right edge). */
+const rowRight = (items: Item[]) => {
+  const last = items.at(-1);
+  return last ? last.x + (last.kind === 'more' ? last.w / 2 : 0) : G.CX;
+};
+
 /** Prototype `renderTree` geometry. `squashShas`: commits to draw as squares (see `squashShas`). */
 export function layoutTree(
   snapshot: TreeSnapshot,
   graph: TreeGraph,
   squashShas: ReadonlySet<string> = new Set(),
+  opts: LayoutOptions = {},
 ): TreeLayout {
-  const ordered = branchOrder(snapshot);
+  const view = opts.rows ?? allRows(snapshot);
   const byName = new Map(snapshot.branches.map((b) => [b.name, b]));
-  const yOf = (i: number) => G.TOP + 26 + i * G.RH;
-  let maxItems = 1;
+  const range = opts.range ?? { start: 0, end: view.length };
+  let right = G.CX;
 
-  const rows: Row[] = ordered.map((branch, i) => {
-    const { shas, total } = ownCommits(graph, branch, byName);
-    const shown = shas.slice(-MAX_SHOWN);
-    const more = total - shown.length;
-    const items: Item[] = [];
-    let x = G.CX;
-    if (more > 0) {
-      items.push({ kind: 'more', count: more, x });
-      x += G.STEP;
-    }
-    for (const sha of shown) {
-      const c = graph.commit(sha)!;
-      items.push({
-        kind: 'commit',
-        sha,
-        x,
-        isHead: sha === branch.headSha,
-        isMerge: c.parents.length > 1,
-        isSquash: squashShas.has(sha),
-      });
-      x += G.STEP;
-    }
-    maxItems = Math.max(maxItems, items.length);
-    return { branch, y: yOf(i), items, note: mergeNote(branch, byName), sub: subLine(branch) };
+  const rows: Row[] = view.map((r, i): Row => {
+    const y = rowY(i);
+    if (r.kind === 'merged') return { ...r, y };
+    const inRange = i >= range.start && i < range.end;
+    const items = inRange
+      ? rowItems(graph, r.branch, byName, squashShas, opts.expanded?.has(r.branch.name) ?? false)
+      : [];
+    right = Math.max(right, rowRight(items));
+    return {
+      ...r,
+      y,
+      items,
+      note: mergeNote(r.branch, byName),
+      sub: subLine(r.branch),
+    };
   });
 
   const last = Math.max(0, rows.length - 1);
   return {
-    width: Math.max(760, G.CX - 10 + maxItems * G.STEP + 30),
-    height: yOf(last) + 54,
-    repoY: (yOf(0) + yOf(last)) / 2,
+    // Prototype: CX - 10 + maxItems * STEP + 30, i.e. the last item's centre + STEP + 20.
+    width: Math.max(760, right + G.STEP + 20),
+    height: rowY(last) + 54,
+    repoY: (rowY(0) + rowY(last)) / 2,
     rows,
+    branchCount: snapshot.branches.length,
   };
 }
 
-/** Branches whose drawn history contains `sha`. */
+/** Branches whose drawn history contains `sha` (one walk down from `sha`, not one per branch). */
 export function branchesContaining(snapshot: TreeSnapshot, graph: TreeGraph, sha: string) {
-  return snapshot.branches.filter((b) => graph.reach(b.headSha).has(sha)).map((b) => b.name);
+  const below = graph.descendants(sha);
+  return snapshot.branches.filter((b) => below.has(b.headSha)).map((b) => b.name);
 }
