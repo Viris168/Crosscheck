@@ -52,6 +52,8 @@ action_missing, invalid_output, github_error, internal`.
 3. **ChatGPT tokens: `encrypt()` at rest. Ingest tokens: `hashToken()` only.**
 4. **Never store source code, patches, prompts or raw AI output.** Store findings + metadata.
    Inngest events and step outputs carry ids/counts only (step outputs are persisted by Inngest).
+   Exception (branch tree): commits-only clones (`tree:0`) in `REPO_CACHE_DIR` keep commit messages inside
+   commit objects; that volume is treated like Postgres — never logged, exported or sent anywhere.
 5. **Never send secret-like files to AI** (`.env*`, `*.pem`, `*.key`, lockfiles, `ignorePaths`).
 6. **AI output and ingest payloads are untrusted:** zod-validate, cap lengths, escape markdown, drop
    issues not in the diff, neutralize @mentions.

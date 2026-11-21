@@ -32,6 +32,14 @@ describe('parseEnv', () => {
     expect(message).not.toContain(secret);
   });
 
+  it('defaults REPO_CACHE_DIR when unset or empty', () => {
+    expect(parseEnv(valid).REPO_CACHE_DIR).toBe('./.cache/repos');
+    expect(parseEnv({ ...valid, REPO_CACHE_DIR: '' }).REPO_CACHE_DIR).toBe('./.cache/repos');
+    expect(parseEnv({ ...valid, REPO_CACHE_DIR: '/data/repos' }).REPO_CACHE_DIR).toBe(
+      '/data/repos',
+    );
+  });
+
   it('validates ENCRYPTION_KEY length', () => {
     expect(parseEnv({ ...valid, ENCRYPTION_KEY: randomBytes(32).toString('base64') })).toBeTruthy();
     expect(() =>
