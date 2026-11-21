@@ -1,5 +1,6 @@
 // Public entry for lane B (Jobs). Other lanes import `inngest` from '@/server/jobs' to send events.
 import type { InngestFunction } from 'inngest';
+import { getRedis } from '@/server/redis';
 import { inngest } from './client';
 import {
   memberPrune,
@@ -7,8 +8,11 @@ import {
   reviewFinalize,
   reviewStart,
   reviewSweep,
+  treeCron,
+  treeRefresh,
   treeSync,
 } from './functions';
+import { redisTreeRefreshState } from './tree-refresh';
 
 export { inngest };
 
@@ -20,6 +24,8 @@ export const functions: InngestFunction.Any[] = [
   memberSync,
   memberPrune,
   treeSync,
+  treeRefresh,
+  treeCron,
 ];
 
 /**
@@ -32,4 +38,14 @@ export async function requestTreeSync(
   reason: 'manual' | 'first_view' | 'webhook' | 'cron',
 ): Promise<void> {
   await inngest.send({ name: 'tree/sync-requested', data: { repoId, orgId, reason } });
+}
+
+/**
+ * Note that someone opened a repo's Branches page (T5c's GET `/api/repos/:repoId/tree` calls this).
+ * `tree-cron` keeps only repos viewed in the last 7 days fresh. Best effort: never throws.
+ */
+export async function recordTreeView(repoId: string, at: Date = new Date()): Promise<void> {
+  await redisTreeRefreshState(getRedis())
+    .recordView(repoId, at)
+    .catch(() => {});
 }

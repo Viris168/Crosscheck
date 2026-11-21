@@ -214,7 +214,7 @@ export async function treeSyncHandler(
 ): Promise<TreeSyncResult> {
   const { repoId, reason } = ctx.event.data;
   const { step } = ctx;
-  const { store, github, cache, merged, log } = deps;
+  const { store, github, cache, log } = deps;
 
   const loadRepo = async (): Promise<TreeRepo> => {
     const repo = await store.getRepo(repoId);
@@ -268,189 +268,7 @@ export async function treeSyncHandler(
       return { ok: true };
     });
 
-    await step.run('ci', async () => {
-      const heads = unique((await store.liveBranches(repoId)).map((b) => b.headSha));
-      const terminal = await store.terminalCiShas(repoId, heads);
-      const todo = heads.filter((s) => !terminal.has(s)).slice(0, CI_MAX_PER_RUN);
-      const repo = todo.length ? await loadRepo() : null;
-      await mapLimit(todo, CI_PARALLEL, async (sha) => {
-        const ci = await githubCall(() => github.fetchCiState(repo!, sha), 'CI read failed');
-        await store.saveCi(repoId, sha, ci);
-      });
-      return {
-        heads: heads.length,
-        cached: terminal.size,
-        fetched: todo.length,
-        deferred: heads.length - terminal.size - todo.length,
-      };
-    });
-
-    /** What both `merged` and `snapshot` build on. Re-read per step: step outputs carry counts only. */
-    const readInputs = async (repo: TreeRepo) => {
-      const all = await store.liveBranches(repoId);
-      const def = all.find((b) => b.isDefault);
-      if (!def) throw nonRetriable('internal', 'repo has no default branch');
-      const capped = all.slice(0, TREE_MAX_BRANCHES);
-      const graph = await cache.readGraph(repo, unique(capped.map((b) => b.headSha)));
-      // A head the clone lacks moved after `fetch` (force-push in between): leave it for the next sync.
-      if (graph.missing.has(def.headSha))
-        throw retriable('github_error', 'default branch head not in clone yet');
-      const branches = capped.filter((b) => !graph.missing.has(b.headSha));
-      const [prs, overrides] = await Promise.all([
-        store.prRecords(repoId),
-        store.overrides(repoId),
-      ]);
-      return { all, def, capped, graph, branches, prs, overrides };
-    };
-
-    await step.run('merged', async () => {
-      const repo = await loadRepo();
-      const out = { checked: 0, merged: 0, byVia: { pr: 0, rebased: 0, squashed: 0 } };
-      const count = (via: MergedVia) => {
-        out.merged++;
-        out.byVia[via]++;
-      };
-      // Nothing in here fails the sync: on any error those branches simply stay unmerged.
-      let stage: 'graph' | 'cache' | 'workspace' = 'graph';
-      try {
-        const { def, graph, branches, prs, overrides } = await readInputs(repo);
-        const cg = new CommitGraph(graph.commits);
-        const choices = pickCompareWith({
-          graph: cg,
-          defaultBranch: def.name,
-          branches,
-          overrides,
-          prs,
-        });
-        const heads = new Map(branches.map((b) => [b.name, b.headSha]));
-        stage = 'cache';
-        const cached = await merged.readCache(repoId).catch((err: unknown) => {
-          log.warn(
-            { repoId, reason: 'cache_unavailable', errorCode: errorCodeOf(err) },
-            'tree-sync merged: cache read failed',
-          );
-          return new Map<string, string>();
-        });
-        const keep = new Map<string, MergedCacheValue>();
-        const todo: MergedDetectBranch[] = [];
-        const fieldOf = new Map<string, string>();
-        for (const b of branches) {
-          if (b.name === def.name) continue;
-          // Rule 1 (PR record) is cheap and always fresh: `buildSnapshot` applies it again.
-          if (prMerge(cg, b, prs)) {
-            count('pr');
-            continue;
-          }
-          const target = choices.get(b.name)?.compareWith;
-          const targetSha = target ? heads.get(target) : undefined;
-          if (!target || !targetSha) continue;
-          const field = mergedCacheField(b.name, b.headSha, targetSha);
-          const hit = parseCached(cached.get(field));
-          if (hit) {
-            keep.set(field, hit);
-            if (hit !== 'none') count(hit);
-            continue;
-          }
-          fieldOf.set(b.name, field);
-          todo.push({ name: b.name, headSha: b.headSha, compareWith: target, targetSha });
-        }
-        if (todo.length) {
-          stage = 'workspace';
-          out.checked = todo.length;
-          try {
-            const auth = await github.gitAuth(repo); // fresh token: the workspace fetches contents
-            const found = await merged.detect(repo, auth, {
-              defaultBranch: def.name,
-              branches,
-              graph: graph.commits,
-              prs,
-              overrides,
-              check: todo,
-            });
-            for (const b of todo) {
-              const r = found.get(b.name);
-              if (r === undefined) continue; // not checked (cap or timeout): try again next sync
-              keep.set(fieldOf.get(b.name)!, r ?? 'none');
-              if (r) count(r);
-            }
-          } catch (err) {
-            log.warn(
-              { repoId, reason: 'workspace_failed', errorCode: errorCodeOf(err) },
-              'tree-sync merged: content check failed',
-            );
-          }
-        }
-        stage = 'cache';
-        await merged.writeCache(repoId, keep).catch((err: unknown) => {
-          log.warn(
-            { repoId, reason: 'cache_unavailable', errorCode: errorCodeOf(err) },
-            'tree-sync merged: cache write failed',
-          );
-        });
-      } catch (err) {
-        log.warn(
-          { repoId, reason: `${stage}_failed`, errorCode: errorCodeOf(err) },
-          'tree-sync merged: skipped',
-        );
-      }
-      return out;
-    });
-
-    const snap = await step.run('snapshot', async () => {
-      const repo = await loadRepo();
-      const { all, def, capped, graph, branches, prs, overrides } = await readInputs(repo);
-      const ci = await store.ciStates(repoId, unique(branches.map((b) => b.headSha)));
-      const contentMerged = await merged.readCache(repoId).catch((err: unknown) => {
-        log.warn(
-          { repoId, reason: 'cache_unavailable', errorCode: errorCodeOf(err) },
-          'tree-sync snapshot: merged cache read failed',
-        );
-        return new Map<string, string>();
-      });
-      const headOf = new Map(branches.map((b) => [b.name, b.headSha]));
-      const truncated = graph.truncated || capped.length < all.length;
-      let snapshot: TreeSnapshot | undefined;
-      for (const cap of COMMIT_CAPS) {
-        const built = buildSnapshot({
-          defaultBranch: def.name,
-          branches: branches.map((b) => ({
-            name: b.name,
-            headSha: b.headSha,
-            recordedParents: b.recordedParents,
-            recorded: b.recordedAt !== null,
-          })),
-          graph: graph.commits,
-          prs,
-          overrides,
-          ci,
-          truncated,
-          maxCommitsPerBranch: cap,
-        });
-        applyContentMerged(built.branches, headOf, contentMerged);
-        if (built.commits.length <= TREE_MAX_COMMITS || cap === COMMIT_CAPS.at(-1)) {
-          if (built.commits.length > TREE_MAX_COMMITS) {
-            built.commits = built.commits.slice(-TREE_MAX_COMMITS);
-            built.truncated = true;
-          }
-          const parsed = TreeSnapshotSchema.safeParse(built);
-          // No zod details: issues can quote branch names.
-          if (!parsed.success) throw nonRetriable('internal', 'snapshot failed validation');
-          snapshot = parsed.data;
-          break;
-        }
-      }
-      await store.saveSnapshot(repoId, {
-        defaultBranch: def.name,
-        snapshot: snapshot!,
-        syncedAt: deps.now(),
-      });
-      return {
-        branches: snapshot!.branches.length,
-        commits: snapshot!.commits.length,
-        skippedBranches: capped.length - branches.length,
-        truncated: snapshot!.truncated,
-      };
-    });
+    const snap = await rebuildSnapshotSteps(step, deps, repoId);
 
     log.info({ repoId, reason, ...snap }, 'tree-sync done');
     return {
@@ -474,6 +292,223 @@ export async function treeSyncHandler(
     log.error({ repoId, reason, errorCode: code, err: errorMessageOf(err) }, 'tree-sync failed');
     return { status: 'failed', errorCode: code };
   }
+}
+
+/** Which branch heads the `ci` step looks at (tree-refresh passes the heads its events touched). */
+export interface CiStepOptions {
+  /** only these SHAs (default: every live head) */
+  only?: readonly string[];
+  /** re-fetch these even if their cached state is terminal (a CI event said it changed) */
+  force?: readonly string[];
+}
+
+/**
+ * The `ci`, `merged` and `snapshot` steps (T2c + T3b): CI for branch heads, content-merged detection with
+ * its Redis cache, then the snapshot from the clone + DB. Shared by tree-sync and tree-refresh (T5b).
+ * Throws like the steps do; the caller decides what a failure means.
+ */
+export async function rebuildSnapshotSteps(
+  step: TreeSyncStep,
+  deps: TreeSyncDeps,
+  repoId: string,
+  ciOpts: CiStepOptions = {},
+): Promise<{ branches: number; commits: number; skippedBranches: number; truncated: boolean }> {
+  const { store, github, cache, merged, log } = deps;
+  const loadRepo = async (): Promise<TreeRepo> => {
+    const repo = await store.getRepo(repoId);
+    if (!repo || !repo.active) throw nonRetriable('internal', 'repo missing or inactive');
+    return repo;
+  };
+
+  await step.run('ci', async () => {
+    let heads = unique((await store.liveBranches(repoId)).map((b) => b.headSha));
+    if (ciOpts.only) {
+      const only = new Set(ciOpts.only);
+      heads = heads.filter((s) => only.has(s));
+    }
+    const force = new Set(ciOpts.force ?? []);
+    const terminal = await store.terminalCiShas(repoId, heads);
+    for (const s of force) terminal.delete(s);
+    const todo = heads.filter((s) => !terminal.has(s)).slice(0, CI_MAX_PER_RUN);
+    const repo = todo.length ? await loadRepo() : null;
+    await mapLimit(todo, CI_PARALLEL, async (sha) => {
+      const ci = await githubCall(() => github.fetchCiState(repo!, sha), 'CI read failed');
+      await store.saveCi(repoId, sha, ci);
+    });
+    return {
+      heads: heads.length,
+      cached: terminal.size,
+      fetched: todo.length,
+      deferred: heads.length - terminal.size - todo.length,
+    };
+  });
+
+  /** What both `merged` and `snapshot` build on. Re-read per step: step outputs carry counts only. */
+  const readInputs = async (repo: TreeRepo) => {
+    const all = await store.liveBranches(repoId);
+    const def = all.find((b) => b.isDefault);
+    if (!def) throw nonRetriable('internal', 'repo has no default branch');
+    const capped = all.slice(0, TREE_MAX_BRANCHES);
+    const graph = await cache.readGraph(repo, unique(capped.map((b) => b.headSha)));
+    // A head the clone lacks moved after `fetch` (force-push in between): leave it for the next sync.
+    if (graph.missing.has(def.headSha))
+      throw retriable('github_error', 'default branch head not in clone yet');
+    const branches = capped.filter((b) => !graph.missing.has(b.headSha));
+    const [prs, overrides] = await Promise.all([store.prRecords(repoId), store.overrides(repoId)]);
+    return { all, def, capped, graph, branches, prs, overrides };
+  };
+
+  await step.run('merged', async () => {
+    const repo = await loadRepo();
+    const out = { checked: 0, merged: 0, byVia: { pr: 0, rebased: 0, squashed: 0 } };
+    const count = (via: MergedVia) => {
+      out.merged++;
+      out.byVia[via]++;
+    };
+    // Nothing in here fails the sync: on any error those branches simply stay unmerged.
+    let stage: 'graph' | 'cache' | 'workspace' = 'graph';
+    try {
+      const { def, graph, branches, prs, overrides } = await readInputs(repo);
+      const cg = new CommitGraph(graph.commits);
+      const choices = pickCompareWith({
+        graph: cg,
+        defaultBranch: def.name,
+        branches,
+        overrides,
+        prs,
+      });
+      const heads = new Map(branches.map((b) => [b.name, b.headSha]));
+      stage = 'cache';
+      const cached = await merged.readCache(repoId).catch((err: unknown) => {
+        log.warn(
+          { repoId, reason: 'cache_unavailable', errorCode: errorCodeOf(err) },
+          'tree-sync merged: cache read failed',
+        );
+        return new Map<string, string>();
+      });
+      const keep = new Map<string, MergedCacheValue>();
+      const todo: MergedDetectBranch[] = [];
+      const fieldOf = new Map<string, string>();
+      for (const b of branches) {
+        if (b.name === def.name) continue;
+        // Rule 1 (PR record) is cheap and always fresh: `buildSnapshot` applies it again.
+        if (prMerge(cg, b, prs)) {
+          count('pr');
+          continue;
+        }
+        const target = choices.get(b.name)?.compareWith;
+        const targetSha = target ? heads.get(target) : undefined;
+        if (!target || !targetSha) continue;
+        const field = mergedCacheField(b.name, b.headSha, targetSha);
+        const hit = parseCached(cached.get(field));
+        if (hit) {
+          keep.set(field, hit);
+          if (hit !== 'none') count(hit);
+          continue;
+        }
+        fieldOf.set(b.name, field);
+        todo.push({ name: b.name, headSha: b.headSha, compareWith: target, targetSha });
+      }
+      if (todo.length) {
+        stage = 'workspace';
+        out.checked = todo.length;
+        try {
+          const auth = await github.gitAuth(repo); // fresh token: the workspace fetches contents
+          const found = await merged.detect(repo, auth, {
+            defaultBranch: def.name,
+            branches,
+            graph: graph.commits,
+            prs,
+            overrides,
+            check: todo,
+          });
+          for (const b of todo) {
+            const r = found.get(b.name);
+            if (r === undefined) continue; // not checked (cap or timeout): try again next sync
+            keep.set(fieldOf.get(b.name)!, r ?? 'none');
+            if (r) count(r);
+          }
+        } catch (err) {
+          log.warn(
+            { repoId, reason: 'workspace_failed', errorCode: errorCodeOf(err) },
+            'tree-sync merged: content check failed',
+          );
+        }
+      }
+      stage = 'cache';
+      await merged.writeCache(repoId, keep).catch((err: unknown) => {
+        log.warn(
+          { repoId, reason: 'cache_unavailable', errorCode: errorCodeOf(err) },
+          'tree-sync merged: cache write failed',
+        );
+      });
+    } catch (err) {
+      log.warn(
+        { repoId, reason: `${stage}_failed`, errorCode: errorCodeOf(err) },
+        'tree-sync merged: skipped',
+      );
+    }
+    return out;
+  });
+
+  const snap = await step.run('snapshot', async () => {
+    const repo = await loadRepo();
+    const { all, def, capped, graph, branches, prs, overrides } = await readInputs(repo);
+    const ci = await store.ciStates(repoId, unique(branches.map((b) => b.headSha)));
+    const contentMerged = await merged.readCache(repoId).catch((err: unknown) => {
+      log.warn(
+        { repoId, reason: 'cache_unavailable', errorCode: errorCodeOf(err) },
+        'tree-sync snapshot: merged cache read failed',
+      );
+      return new Map<string, string>();
+    });
+    const headOf = new Map(branches.map((b) => [b.name, b.headSha]));
+    const truncated = graph.truncated || capped.length < all.length;
+    let snapshot: TreeSnapshot | undefined;
+    for (const cap of COMMIT_CAPS) {
+      const built = buildSnapshot({
+        defaultBranch: def.name,
+        branches: branches.map((b) => ({
+          name: b.name,
+          headSha: b.headSha,
+          recordedParents: b.recordedParents,
+          // "recorded" only when the push webhook saw a parent; zero matches → the engine infers.
+          recorded: b.recordedAt !== null && b.recordedParents.length > 0,
+        })),
+        graph: graph.commits,
+        prs,
+        overrides,
+        ci,
+        truncated,
+        maxCommitsPerBranch: cap,
+      });
+      applyContentMerged(built.branches, headOf, contentMerged);
+      if (built.commits.length <= TREE_MAX_COMMITS || cap === COMMIT_CAPS.at(-1)) {
+        if (built.commits.length > TREE_MAX_COMMITS) {
+          built.commits = built.commits.slice(-TREE_MAX_COMMITS);
+          built.truncated = true;
+        }
+        const parsed = TreeSnapshotSchema.safeParse(built);
+        // No zod details: issues can quote branch names.
+        if (!parsed.success) throw nonRetriable('internal', 'snapshot failed validation');
+        snapshot = parsed.data;
+        break;
+      }
+    }
+    await store.saveSnapshot(repoId, {
+      defaultBranch: def.name,
+      snapshot: snapshot!,
+      syncedAt: deps.now(),
+    });
+    return {
+      branches: snapshot!.branches.length,
+      commits: snapshot!.commits.length,
+      skippedBranches: capped.length - branches.length,
+      truncated: snapshot!.truncated,
+    };
+  });
+
+  return snap;
 }
 
 // --- merged state (pure) ---
@@ -816,7 +851,7 @@ export function redisTreeMerged(redis: MergedRedis, detect: TreeMerged['detect']
 // --- helpers ---
 
 /** GitHub API failures become retriable `github_error`s with a generic message (no repo/branch names). */
-async function githubCall<T>(fn: () => Promise<T>, message: string): Promise<T> {
+export async function githubCall<T>(fn: () => Promise<T>, message: string): Promise<T> {
   try {
     return await fn();
   } catch (err) {

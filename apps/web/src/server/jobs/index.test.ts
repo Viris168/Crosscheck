@@ -6,7 +6,7 @@ describe('@/server/jobs', () => {
     expect(inngest.id).toBe('ai-review');
   });
 
-  it('registers review-start, review-finalize, review-sweep, member-sync, member-prune and tree-sync', () => {
+  it('registers the review, member and branch-tree functions', () => {
     const ids = functions.map((f) => f.id());
     expect(ids).toEqual([
       'review-start',
@@ -15,6 +15,8 @@ describe('@/server/jobs', () => {
       'member-sync',
       'member-prune',
       'tree-sync',
+      'tree-refresh',
+      'tree-cron',
     ]);
   });
 
@@ -26,7 +28,8 @@ describe('@/server/jobs', () => {
           appPrefix: 'ai-review',
         })[0],
     );
-    const [start, finalize, sweep, memberSync, memberPrune, treeSync] = configs;
+    const [start, finalize, sweep, memberSync, memberPrune, treeSync, treeRefresh, treeCron] =
+      configs;
     expect(start?.triggers).toEqual([{ event: 'review/requested' }]);
     expect(start?.concurrency).toEqual({ key: 'event.data.orgId', limit: 3 });
     expect(finalize?.triggers).toEqual([{ event: 'review/finalize' }]);
@@ -39,6 +42,15 @@ describe('@/server/jobs', () => {
       { key: 'event.data.repoId', limit: 1 },
       { key: 'event.data.orgId', limit: 2 },
     ]);
+    // 10 events in 1 s → one run: debounced per repo, then one run per repo at a time.
+    expect(treeRefresh?.triggers).toEqual([{ event: 'tree/refs-changed' }]);
+    expect(treeRefresh?.debounce).toEqual({
+      key: 'event.data.repoId',
+      period: '2s',
+      timeout: '10s',
+    });
+    expect(treeRefresh?.concurrency).toEqual({ key: 'event.data.repoId', limit: 1 });
+    expect(treeCron?.triggers).toEqual([{ cron: '*/15 * * * *' }]);
     expect(start?.steps?.step?.retries).toEqual({ attempts: 2 }); // = retries (2 retries after the first try);
   });
 });

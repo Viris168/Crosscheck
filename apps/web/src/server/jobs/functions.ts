@@ -1,7 +1,9 @@
 // Inngest function definitions. Handlers live in review-*.ts and take their dependencies explicitly.
 import { LIMITS, REVIEW_SWEEP_CRON } from '@app/shared';
 import { pruneRemovedMembers, syncUserMemberships } from '@/server/github';
+import { env } from '@/server/env';
 import { logger } from '@/server/logger';
+import { getRedis } from '@/server/redis';
 import { inngest } from './client';
 import { realDeps, realTreeSyncDeps, type JobDeps, type StepTools } from './deps';
 import { MEMBER_PRUNE_CRON, memberPruneHandler } from './member-prune';
@@ -9,12 +11,47 @@ import { memberSyncHandler } from './member-sync';
 import { reviewFinalizeHandler } from './review-finalize';
 import { reviewStartHandler } from './review-start';
 import { reviewSweepHandler } from './review-sweep';
+import { redisRepoLock } from './repo-cache';
+import {
+  TREE_CRON,
+  fetchCloneRefs,
+  prismaTreeRefreshStore,
+  redisTreeRefreshState,
+  treeCronHandler,
+  treeRefreshHandler,
+  type TreeRefreshDeps,
+  type TreeRefreshStep,
+} from './tree-refresh';
 import { treeSyncHandler, type TreeSyncDeps, type TreeSyncStep } from './tree-sync';
 
 let deps: JobDeps | undefined;
 const getDeps = (): JobDeps => (deps ??= realDeps());
 let treeDeps: TreeSyncDeps | undefined;
 const getTreeDeps = (): TreeSyncDeps => (treeDeps ??= realTreeSyncDeps());
+let refreshDeps: TreeRefreshDeps | undefined;
+const getRefreshDeps = (): TreeRefreshDeps => (refreshDeps ??= realTreeRefreshDeps());
+
+/** Wait this long for the clone lock (a full sync may hold it) before the step gives up and retries. */
+const REFRESH_LOCK_WAIT_MS = 30_000;
+
+function realTreeRefreshDeps(): TreeRefreshDeps {
+  const redis = getRedis();
+  const lock = redisRepoLock(redis);
+  return {
+    sync: getTreeDeps(),
+    store: prismaTreeRefreshStore,
+    state: redisTreeRefreshState(redis),
+    refs: {
+      fetchRefs: (repo, auth, refs) =>
+        fetchCloneRefs(repo, auth, refs, {
+          cacheDir: env.REPO_CACHE_DIR,
+          lock,
+          lockWaitMs: REFRESH_LOCK_WAIT_MS,
+          assertNoContents: process.env.TREE_ASSERT_NO_CONTENTS === '1',
+        }),
+    },
+  };
+}
 
 // Inngest's `step.run` returns `Jsonify<T>`; our step outputs are plain JSON, so `StepTools` matches.
 const tools = (step: unknown): StepTools => step as StepTools;
@@ -93,4 +130,38 @@ export const treeSync = inngest.createFunction(
   { event: 'tree/sync-requested' },
   ({ event, step }) =>
     treeSyncHandler({ event, step: step as unknown as TreeSyncStep }, getTreeDeps()),
+);
+
+/**
+ * Branch tree, live (T5b): apply the new `GitEvent`s, fetch only the touched refs, rebuild the snapshot.
+ * Debounced per repo (a burst of pushes → one run, with the last event), one run per repo at a time.
+ * VERIFY: inngest v3 `debounce: { key, period, timeout }` runs once with the last event of the window,
+ * and combines with `concurrency` (a debounced run waits for the running one).
+ */
+export const treeRefresh = inngest.createFunction(
+  {
+    id: 'tree-refresh',
+    retries: 2,
+    debounce: { key: 'event.data.repoId', period: '2s', timeout: '10s' },
+    concurrency: { key: 'event.data.repoId', limit: 1 },
+  },
+  { event: 'tree/refs-changed' },
+  ({ event, step }) =>
+    treeRefreshHandler({ event, step: step as unknown as TreeRefreshStep }, getRefreshDeps()),
+);
+
+/**
+ * Every 15 min: full sync for repos whose tree is older than 15 min and was viewed in the last 7 days
+ * (views tracked in Redis by `recordTreeView`). One run at a time.
+ */
+export const treeCron = inngest.createFunction(
+  { id: 'tree-cron', retries: 2, concurrency: { limit: 1 } },
+  { cron: TREE_CRON },
+  ({ step }) => {
+    const d = getRefreshDeps();
+    return treeCronHandler(
+      { step: step as unknown as TreeRefreshStep },
+      { store: d.store, state: d.state, now: () => new Date(), log: logger },
+    );
+  },
 );
