@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@app/db": "workspace:*",
+    "@app/git-graph": "workspace:*",
     "@app/github": "workspace:*",
     "@app/github-comments": "workspace:*",
     "@app/providers": "workspace:*",
