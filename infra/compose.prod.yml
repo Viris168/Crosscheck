@@ -61,6 +61,13 @@ services:
     restart: unless-stopped
     init: true
     expose: ['3000']
+    environment:
+      <<: *web-env
+      # Commits-only clone cache for the branch tree. A cache, not data: not backed up, rebuilt by the next sync.
+      REPO_CACHE_DIR: /var/lib/app/repos
+    volumes:
+      # The image creates /var/lib/app/repos owned by `node` (uid 1000); a new named volume copies that owner.
+      - repo-cache:/var/lib/app/repos
     networks: [edge, backend]
     depends_on:
       migrate:
@@ -152,6 +159,8 @@ networks:
 
 volumes:
   pgdata:
+  # Branch-tree clone cache (see docs/deploy.md → 3.9). Not in backup.sh on purpose.
+  repo-cache:
   redisdata:
   caddy_data:
   caddy_config:
