@@ -36,6 +36,12 @@ export interface CompareInput {
   /** `CompareOverride` rows: branch → compareWith */
   overrides?: Lookup;
   prs?: readonly PrRecord[];
+  /**
+   * T6a: pick only for these branches and every branch on their compare-with chains (plus the default
+   * branch). The picks are the same as without `only` (loops are broken the same way); branches off those
+   * chains are left out of the result. Unknown names are ignored. Default: every branch.
+   */
+  only?: readonly string[];
 }
 
 export interface CompareChoice {
@@ -148,6 +154,7 @@ class Repo {
 /** Prototype `compareMap`: a choice for every branch, with loops broken by falling back to the default. */
 export function pickCompareWith(input: CompareInput): Map<string, CompareChoice> {
   const r = new Repo(input);
+  if (input.only) return pickChains(r, input.only);
   const m = new Map<string, CompareChoice>();
   for (const b of r.heads.keys()) m.set(b, b === r.def ? choice(null, 'default') : r.chooseBase(b));
   // Guesses and hand-set choices can point at each other. Walk in name order; a later walk sees the
@@ -161,6 +168,51 @@ export function pickCompareWith(input: CompareInput): Map<string, CompareChoice>
     }
     if (x === b) m.set(b, choice(r.def, 'default', { loop: true }));
   }
+  return m;
+}
+
+/**
+ * `pickCompareWith` for `only` and their chains. Same result per branch as the full walk: the full walk
+ * only ever changes a branch that is on a loop, and on each loop (loops never share a branch: every
+ * branch has one target) it changes the member that comes first by name, which then points at the
+ * default branch. So following each chain and breaking any loop on it at its first-by-name member
+ * gives the same picks.
+ */
+function pickChains(r: Repo, only: readonly string[]): Map<string, CompareChoice> {
+  const raw = new Map<string, CompareChoice>();
+  const get = (b: string) => {
+    let c = raw.get(b);
+    if (!c) {
+      c = b === r.def ? choice(null, 'default') : r.chooseBase(b);
+      raw.set(b, c);
+    }
+    return c;
+  };
+  const keep = new Set<string>();
+  if (r.heads.has(r.def)) keep.add(r.def);
+  for (const start of only) {
+    if (!r.heads.has(start)) continue;
+    for (;;) {
+      const path: string[] = [];
+      const onPath = new Set<string>();
+      let x: string | null = start;
+      while (x && !onPath.has(x) && !keep.has(x)) {
+        path.push(x);
+        onPath.add(x);
+        x = get(x).compareWith;
+      }
+      if (x && onPath.has(x)) {
+        const loop = path.slice(path.indexOf(x)).sort();
+        raw.set(loop[0]!, choice(r.def, 'default', { loop: true }));
+        continue; // walk again with the loop broken
+      }
+      for (const b of path) keep.add(b);
+      break;
+    }
+  }
+  // Same key order as the full result (input branch order).
+  const m = new Map<string, CompareChoice>();
+  for (const b of r.heads.keys()) if (keep.has(b)) m.set(b, get(b));
   return m;
 }
 

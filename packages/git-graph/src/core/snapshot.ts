@@ -1,5 +1,7 @@
 // Build the TreeSnapshot the page draws. `merged` comes from `detectMerged`: the PR record, else the
 // content facts the caller got from `detectMergedWithFallbacks` (T3b runs it in the sync job).
+// Lazy table (T6a): with `visible`, ahead/behind/merge base and the drawn commits are computed only for
+// the visible rows and the rows on their compare-with chains; the other rows get `NOT_COMPUTED`.
 import { CommitGraph, type CommitInput } from './graph';
 import {
   branchOrder,
@@ -31,7 +33,19 @@ export interface SnapshotInput {
   content?: ContentFactsLookup;
   /** newest own commits kept per branch in `commits` (the page shows the last few plus "+N"). Default 50. */
   maxCommitsPerBranch?: number;
+  /**
+   * T6a lazy table: the branch names the page shows. Only these rows and the rows on their compare-with
+   * chains get ahead/behind/mergeBase and commits in `commits`; the others get
+   * `ahead = behind = NOT_COMPUTED` and `mergeBase = null`. Every row still gets compare-with (the tree
+   * layout needs every row's parent), `merged`, `pr` and `ci`. Default: every row is computed.
+   */
+  visible?: readonly string[];
 }
+
+/** `BranchNode.ahead` / `.behind` for rows the lazy table did not compute (`buildSnapshot({ visible })`). */
+// VERIFY: `BranchNodeSchema` (packages/shared) rejects -1 until the T6a request in
+// tasks/CONTRACT_REQUESTS.md is applied; T6b uses the same sentinel.
+export const NOT_COMPUTED = -1;
 
 export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
   const graph = input.graph instanceof CommitGraph ? input.graph : new CommitGraph(input.graph);
@@ -48,6 +62,8 @@ export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
     prs,
   });
   const byName = new Map(input.branches.map((b) => [b.name, b]));
+  // Visible rows plus their chains: the same set `pickCompareWith({ only })` keeps.
+  const computed = input.visible ? chainsOf(input.visible, input.defaultBranch, choices) : null;
   const drawn = new Set<string>();
   const branches: BranchNode[] = [];
 
@@ -56,9 +72,19 @@ export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
     const c = choices.get(name)!;
     const isDefault = name === input.defaultBranch;
     const target = c.compareWith ? byName.get(c.compareWith)! : null;
-    const ab = target ? graph.aheadBehind(b.headSha, target.headSha) : { ahead: 0, behind: 0 };
-    const own = target ? graph.aheadCommits(b.headSha, target.headSha) : graph.reachable(b.headSha);
-    for (const sha of own.slice(-cap)) drawn.add(sha);
+    let ab: { ahead: number; behind: number; mergeBase: string | null };
+    if (computed && !computed.has(name)) {
+      ab = { ahead: NOT_COMPUTED, behind: NOT_COMPUTED, mergeBase: null };
+    } else {
+      // One walk for ahead, behind and the merge base.
+      ab = target
+        ? graph.compare(b.headSha, target.headSha)
+        : { ahead: 0, behind: 0, mergeBase: null };
+      const own = target
+        ? graph.aheadCommits(b.headSha, target.headSha).slice(-cap)
+        : graph.reachableTail(b.headSha, cap);
+      for (const sha of own) drawn.add(sha);
+    }
 
     const pr = prs.filter((p) => p.headRef === name).pop();
     branches.push({
@@ -72,7 +98,7 @@ export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
       loop: c.loop,
       ahead: ab.ahead,
       behind: ab.behind,
-      mergeBase: target ? graph.mergeBase(b.headSha, target.headSha) : null,
+      mergeBase: ab.mergeBase,
       merged: isDefault
         ? null
         : detectMerged({ graph, branch: b, target, prs, content: content.get(name) }),
@@ -93,4 +119,22 @@ export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
     commits,
     truncated: Boolean(input.truncated) || graph.hasMissingParents,
   };
+}
+
+/** `names` and every branch on their compare-with chains, plus the default branch. */
+function chainsOf(
+  names: readonly string[],
+  defaultBranch: string,
+  choices: ReadonlyMap<string, { compareWith: string | null }>,
+): Set<string> {
+  const out = new Set<string>();
+  if (choices.has(defaultBranch)) out.add(defaultBranch);
+  for (const name of names) {
+    let x: string | null = choices.has(name) ? name : null;
+    while (x && !out.has(x)) {
+      out.add(x);
+      x = choices.get(x)?.compareWith ?? null;
+    }
+  }
+  return out;
 }

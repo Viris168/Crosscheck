@@ -31,3 +31,4 @@ export {
   type DetectMergedResult,
 } from './detect-merged';
 export { assertNoContents, objectCounts } from './assert-no-contents';
+export { saveGraph, loadGraph, refSetHash, type RefSet } from './graph-cache';

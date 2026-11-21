@@ -1,6 +1,13 @@
 // Public entry for @app/git-graph (lane T). Pure: no I/O, safe for any runtime.
 // The git adapter lives at '@app/git-graph/git'; the fixture builder at '@app/git-graph/testing'.
-export { CommitGraph, UnknownCommitError, type CommitInput } from './core/graph';
+export {
+  CommitGraph,
+  UnknownCommitError,
+  compare,
+  type CommitInput,
+  type CompareResult,
+} from './core/graph';
+export { serializeGraph, parseGraph, GraphFormatError } from './core/serialize';
 export {
   LONG_LIVED,
   pickCompareWith,
@@ -22,7 +29,12 @@ export {
   type EquivalenceKind,
   type EquivalenceInput,
 } from './core/equivalence';
-export { buildSnapshot, type SnapshotInput, type SnapshotBranchInput } from './core/snapshot';
+export {
+  buildSnapshot,
+  NOT_COMPUTED,
+  type SnapshotInput,
+  type SnapshotBranchInput,
+} from './core/snapshot';
 export {
   prMerge,
   detectMerged,
