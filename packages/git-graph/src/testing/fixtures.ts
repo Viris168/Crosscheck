@@ -15,13 +15,26 @@ export interface BuiltFixture {
   expected: Record<string, Pick<CompareChoice, 'compareWith' | 'why'> & Partial<CompareChoice>>;
   /** expected `BranchNode.merged` (PR rule) for branches that have one; every other branch → null */
   expectedMerged: Record<string, NonNullable<BranchNode['merged']>>;
+  /**
+   * T3a: expected content-rule result for branches with no merged PR, checked against their compare-with
+   * target. Branches not listed → not marked (null).
+   */
+  expectedContent: Record<string, 'rebased' | 'squashed'>;
 }
 
 type Def = Omit<
   BuiltFixture,
-  'name' | 'repo' | 'defaultBranch' | 'overrides' | 'recordedParents' | 'expectedMerged'
+  | 'name'
+  | 'repo'
+  | 'defaultBranch'
+  | 'overrides'
+  | 'recordedParents'
+  | 'expectedMerged'
+  | 'expectedContent'
 > &
-  Partial<Pick<BuiltFixture, 'overrides' | 'recordedParents' | 'expectedMerged'>>;
+  Partial<
+    Pick<BuiltFixture, 'overrides' | 'recordedParents' | 'expectedMerged' | 'expectedContent'>
+  >;
 
 function fixture(name: string, build: (r: FixtureRepo) => Def): () => BuiltFixture {
   return () => {
@@ -36,6 +49,7 @@ function fixture(name: string, build: (r: FixtureRepo) => Def): () => BuiltFixtu
         overrides: {},
         recordedParents: {},
         expectedMerged: {},
+        expectedContent: {},
         ...d,
       };
     } catch (e) {
@@ -75,6 +89,7 @@ export const webApp = fixture('web-app', (r) => {
         state: 'merged',
         headSha: r1,
         mergeMethod: 'squash',
+        mergeCommitSha: c4,
       },
       {
         number: 2,
@@ -101,7 +116,14 @@ export const webApp = fixture('web-app', (r) => {
       'hotfix/header': { compareWith: 'main', why: 'pr', whyPr: 3 },
     },
     expectedMerged: {
-      'chore/readme': { via: 'pr', prNumber: 1, method: 'squash', into: 'main', newCommits: 0 },
+      'chore/readme': {
+        via: 'pr',
+        prNumber: 1,
+        method: 'squash',
+        into: 'main',
+        newCommits: 0,
+        mergeCommitSha: c4,
+      },
     },
   };
 });
@@ -116,7 +138,7 @@ export const apiServer = fixture('api-server', (r) => {
   r.checkout('main');
   r.commit('Add Dockerfile');
   // PR #3 rebase-merged.
-  r.cherryPick([s1, s2]);
+  const [, s2c] = r.cherryPick([s1, s2]);
   r.branch('dev', m2);
   r.commit('Add users route');
   const a2 = r.commit('Add pagination');
@@ -133,6 +155,7 @@ export const apiServer = fixture('api-server', (r) => {
         state: 'merged',
         headSha: s2,
         mergeMethod: 'rebase',
+        mergeCommitSha: s2c,
       },
     ],
     expected: {
@@ -142,7 +165,14 @@ export const apiServer = fixture('api-server', (r) => {
       'feature/rate-limit': { compareWith: 'dev', why: 'pr', whyPr: 2 },
     },
     expectedMerged: {
-      'docs/setup': { via: 'pr', prNumber: 3, method: 'rebase', into: 'main', newCommits: 0 },
+      'docs/setup': {
+        via: 'pr',
+        prNumber: 3,
+        method: 'rebase',
+        into: 'main',
+        newCommits: 0,
+        mergeCommitSha: s2c!,
+      },
     },
   };
 });
@@ -155,11 +185,11 @@ export const mergeCommit = fixture('merge-commit', (r) => {
   const a2 = r.commit('A two');
   r.checkout('main');
   r.commit('Main moves');
-  r.merge('feature/a', 'Merge pull request #1');
+  const mA = r.merge('feature/a', 'Merge pull request #1');
   r.branch('feature/b');
   const b1 = r.commit('B one');
   r.checkout('main');
-  r.merge('feature/b', 'Merge pull request #2');
+  const mB = r.merge('feature/b', 'Merge pull request #2');
   r.checkout('feature/b');
   r.commit('B after merge');
   // A branch merged with a merge commit and no PR record (content rule only, T3a).
@@ -177,6 +207,7 @@ export const mergeCommit = fixture('merge-commit', (r) => {
         state: 'merged',
         headSha: a2,
         mergeMethod: 'merge',
+        mergeCommitSha: mA,
       },
       {
         number: 2,
@@ -185,6 +216,7 @@ export const mergeCommit = fixture('merge-commit', (r) => {
         state: 'merged',
         headSha: b1,
         mergeMethod: 'merge',
+        mergeCommitSha: mB,
       },
     ],
     expected: {
@@ -194,8 +226,22 @@ export const mergeCommit = fixture('merge-commit', (r) => {
       'feature/c': { compareWith: 'main', why: 'inferred' },
     },
     expectedMerged: {
-      'feature/a': { via: 'pr', prNumber: 1, method: 'merge', into: 'main', newCommits: 0 },
-      'feature/b': { via: 'pr', prNumber: 2, method: 'merge', into: 'main', newCommits: 1 },
+      'feature/a': {
+        via: 'pr',
+        prNumber: 1,
+        method: 'merge',
+        into: 'main',
+        newCommits: 0,
+        mergeCommitSha: mA,
+      },
+      'feature/b': {
+        via: 'pr',
+        prNumber: 2,
+        method: 'merge',
+        into: 'main',
+        newCommits: 1,
+        mergeCommitSha: mB,
+      },
     },
   };
 });
@@ -208,7 +254,7 @@ export const squashMerge = fixture('squash-merge', (r) => {
   const s2 = r.commit('Sq two');
   r.checkout('main');
   r.commit('Main moves');
-  r.squash('feature/sq', 'Sq (#1)');
+  const sq = r.squash('feature/sq', 'Sq (#1)');
   r.branch('feature/sq-nopr');
   r.commit('Nopr one');
   r.commit('Nopr two');
@@ -223,6 +269,7 @@ export const squashMerge = fixture('squash-merge', (r) => {
         state: 'merged',
         headSha: s2,
         mergeMethod: 'squash',
+        mergeCommitSha: sq,
       },
     ],
     expected: {
@@ -231,8 +278,16 @@ export const squashMerge = fixture('squash-merge', (r) => {
       'feature/sq-nopr': { compareWith: 'main', why: 'inferred' },
     },
     expectedMerged: {
-      'feature/sq': { via: 'pr', prNumber: 1, method: 'squash', into: 'main', newCommits: 0 },
+      'feature/sq': {
+        via: 'pr',
+        prNumber: 1,
+        method: 'squash',
+        into: 'main',
+        newCommits: 0,
+        mergeCommitSha: sq,
+      },
     },
+    expectedContent: { 'feature/sq-nopr': 'squashed' },
   };
 });
 
@@ -251,7 +306,7 @@ export const rebaseMerge = fixture('rebase-merge', (r) => {
   r.commit('Partial two');
   r.checkout('main');
   r.commit('Main moves');
-  r.cherryPick([r1, r2, n1, p1]);
+  const [, r2c] = r.cherryPick([r1, r2, n1, p1]);
   return {
     prs: [
       {
@@ -261,6 +316,7 @@ export const rebaseMerge = fixture('rebase-merge', (r) => {
         state: 'merged',
         headSha: r2,
         mergeMethod: 'rebase',
+        mergeCommitSha: r2c,
       },
     ],
     expected: {
@@ -270,8 +326,17 @@ export const rebaseMerge = fixture('rebase-merge', (r) => {
       'feature/partial': { compareWith: 'main', why: 'inferred' },
     },
     expectedMerged: {
-      'feature/rb': { via: 'pr', prNumber: 1, method: 'rebase', into: 'main', newCommits: 0 },
+      'feature/rb': {
+        via: 'pr',
+        prNumber: 1,
+        method: 'rebase',
+        into: 'main',
+        newCommits: 0,
+        mergeCommitSha: r2c!,
+      },
     },
+    // feature/partial: only its first commit was picked → not merged.
+    expectedContent: { 'feature/rb-nopr': 'rebased' },
   };
 });
 

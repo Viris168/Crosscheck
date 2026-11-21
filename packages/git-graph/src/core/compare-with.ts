@@ -23,6 +23,8 @@ export interface PrRecord {
   /** the PR's head SHA (at merge time for merged PRs) */
   headSha?: string | null;
   mergeMethod?: MergeMethod | null;
+  /** GitHub `merge_commit_sha` (merged PRs): the merge commit, the squash commit or the last rebased one */
+  mergeCommitSha?: string | null;
 }
 
 export type Lookup = ReadonlyMap<string, string> | Readonly<Record<string, string>>;

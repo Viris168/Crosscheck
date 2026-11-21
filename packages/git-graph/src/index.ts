@@ -22,10 +22,14 @@ export {
   type EquivalenceKind,
   type EquivalenceInput,
 } from './core/equivalence';
+export { buildSnapshot, type SnapshotInput, type SnapshotBranchInput } from './core/snapshot';
 export {
-  buildSnapshot,
   prMerge,
-  type SnapshotInput,
-  type SnapshotBranchInput,
-} from './core/snapshot';
+  detectMerged,
+  needsContentCheck,
+  type BranchRef,
+  type ContentFacts,
+  type ContentFactsLookup,
+  type DetectMergedInput,
+} from './core/merged';
 export type * from './types';
