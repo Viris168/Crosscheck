@@ -39,6 +39,13 @@ function serve(body: GetTreeResponse, sync: Response = Response.json({ queued: t
 const render = () => renderWithQuery(<BranchTree repoId="r1" repoFullName="acme/web" />);
 const branchRow = (name: string) =>
   screen.getByRole('button', { name: new RegExp(`^Branch ${name.replace('/', '\\/')},`) });
+/** Unfolds the merged branches compared with `parent` (folded by default, T6b). */
+const openMerged = async (parent = 'main') =>
+  userEvent.click(
+    await screen.findByRole('button', {
+      name: new RegExp(`merged branch(es)? compared with ${parent}$`),
+    }),
+  );
 const rowOrder = () =>
   screen
     .getAllByRole('button', { name: /^Branch / })
@@ -49,13 +56,22 @@ describe('BranchTree with the seed snapshot', () => {
     serve(tree());
     render();
     await screen.findByRole('group', { name: /Repository tree/ });
+    // Merged branches fold into one row under their parent (T6b); unfolding adds them back.
     expect(rowOrder()).toEqual([
       'main',
-      'chore/readme',
       'dev',
       'feature/login',
       'feature/login-oauth',
       'hotfix/header',
+    ]);
+    await openMerged();
+    expect(rowOrder()).toEqual([
+      'main',
+      'dev',
+      'feature/login',
+      'feature/login-oauth',
+      'hotfix/header',
+      'chore/readme',
     ]);
     expect(branchRow('feature/login').getAttribute('aria-label')).toContain(
       'ahead 3 behind 1 vs dev · PR #2',
@@ -66,6 +82,7 @@ describe('BranchTree with the seed snapshot', () => {
   it('renders the merged line and CI dot for open PRs only', async () => {
     serve(tree());
     render();
+    await openMerged();
     const readme = await waitFor(() => branchRow('chore/readme'));
     expect(within(readme).getByText('merged via #1 (squash)')).toBeTruthy();
     expect(readme.querySelector('[data-ci]')).toBeNull(); // PR #1 is merged
@@ -132,7 +149,8 @@ describe('BranchTree with the seed snapshot', () => {
     serve(tree());
     render();
     await userEvent.click(await waitFor(() => branchRow('feature/login')));
-    for (const name of [/^Commit$/, /Create/, /Open PR/, /Merge/, /Run CI/, /Delete/])
+    // (`Merged` alone is the filter chip, T6b.)
+    for (const name of [/^Commit$/, /Create/, /Open PR/, /^Merge(?!d$)/, /Run CI/, /Delete/])
       expect(screen.queryByRole('button', { name })).toBeNull();
     expect(screen.queryByText(/Acting as/)).toBeNull();
     expect(screen.queryByText(/real parents/)).toBeNull();
@@ -222,6 +240,7 @@ describe('Compare with (T4)', () => {
     expect((await waitFor(() => branchRow('dev'))).getAttribute('aria-label')).toContain(
       'vs main · guess',
     );
+    await openMerged();
     await userEvent.click(branchRow('chore/readme'));
     expect(
       within(screen.getByRole('complementary')).getByText('Target of PR #1 (merged).'),
@@ -232,14 +251,14 @@ describe('Compare with (T4)', () => {
     serve(tree());
     render();
     await userEvent.click(await waitFor(() => branchRow('feature/login-oauth')));
-    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByRole('combobox', { name: /with$/ })).toBeNull();
   });
 
   it('lists Automatic + every other branch; default branch has no select', async () => {
     serve(tree({ canEdit: true }));
     render();
     await userEvent.click(await waitFor(() => branchRow('main')));
-    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByRole('combobox', { name: /with$/ })).toBeNull();
     await userEvent.click(branchRow('feature/login-oauth'));
     expect([...select().options].map((o) => o.text)).toEqual([
       'Automatic (PR target, record or guess)',

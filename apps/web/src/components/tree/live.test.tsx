@@ -221,18 +221,18 @@ describe('row changes', () => {
       {
         ...snap,
         branches: [
-          ...snap.branches.filter((b) => b.name !== 'chore/readme'),
+          ...snap.branches.filter((b) => b.name !== 'feature/login-oauth'),
           { ...snap.branches.find((b) => b.name === 'hotfix/header')!, name: 'hotfix/footer' },
         ],
       },
     );
     await poll();
     // Phase 1: old tree, deleted row fading
-    expect(row('chore/readme')!.getAttribute('data-leaving')).toBe('true');
+    expect(row('feature/login-oauth')!.getAttribute('data-leaving')).toBe('true');
     expect(row('hotfix/footer')).toBeNull();
 
     await tick(LEAVE_MS);
-    expect(row('chore/readme')).toBeNull();
+    expect(row('feature/login-oauth')).toBeNull();
     expect(row('hotfix/footer')!.getAttribute('data-entering')).toBe('true');
     expect(row('hotfix/footer')!.classList.contains('bt-enter')).toBe(true);
   });
