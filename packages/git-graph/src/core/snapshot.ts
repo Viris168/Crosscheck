@@ -1,5 +1,5 @@
-// Build the TreeSnapshot the page draws. `merged` comes from the PR record only (prototype `prMerge`);
-// T3a adds the content rule.
+// Build the TreeSnapshot the page draws. `merged` comes from `detectMerged`: the PR record, else the
+// content facts the caller got from `detectMergedWithFallbacks` (T3b runs it in the sync job).
 import { CommitGraph, type CommitInput } from './graph';
 import {
   branchOrder,
@@ -8,6 +8,7 @@ import {
   type Lookup,
   type PrRecord,
 } from './compare-with';
+import { detectMerged, type ContentFactsLookup } from './merged';
 import type { BranchNode, CiState, SnapshotCommit, TreeSnapshot } from '../types';
 
 export interface SnapshotBranchInput extends BranchInput {
@@ -26,23 +27,10 @@ export interface SnapshotInput {
   ci?: ReadonlyMap<string, CiState> | Readonly<Record<string, CiState>>;
   /** the commit list was cut short when it was read */
   truncated?: boolean;
+  /** content-rule facts per branch name (`detectMergedWithFallbacks(...).content`); missing → PR rule only */
+  content?: ContentFactsLookup;
   /** newest own commits kept per branch in `commits` (the page shows the last few plus "+N"). Default 50. */
   maxCommitsPerBranch?: number;
-}
-
-/** Prototype `prMerge`: the newest merged PR for the branch, and how many commits came after its head. */
-export function prMerge(
-  graph: CommitGraph,
-  branch: { name: string; headSha: string },
-  prs: readonly PrRecord[],
-): { pr: PrRecord; newCommits: number } | null {
-  const merged = prs.filter((p) => p.headRef === branch.name && p.state === 'merged');
-  const pr = merged.sort((a, b) => a.number - b.number).pop();
-  if (!pr) return null;
-  if (pr.headSha === branch.headSha) return { pr, newCommits: 0 };
-  // Without the PR's head commit we cannot count what came after it, so we make no claim.
-  if (!pr.headSha || !graph.has(pr.headSha)) return null;
-  return { pr, newCommits: graph.aheadBehind(branch.headSha, pr.headSha).ahead };
 }
 
 export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
@@ -50,6 +38,8 @@ export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
   const prs = [...(input.prs ?? [])].sort((a, b) => a.number - b.number);
   const ci = input.ci instanceof Map ? input.ci : new Map(Object.entries(input.ci ?? {}));
   const cap = input.maxCommitsPerBranch ?? 50;
+  const content =
+    input.content instanceof Map ? input.content : new Map(Object.entries(input.content ?? {}));
   const choices = pickCompareWith({
     graph,
     defaultBranch: input.defaultBranch,
@@ -70,7 +60,6 @@ export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
     const own = target ? graph.aheadCommits(b.headSha, target.headSha) : graph.reachable(b.headSha);
     for (const sha of own.slice(-cap)) drawn.add(sha);
 
-    const m = isDefault ? null : prMerge(graph, b, prs);
     const pr = prs.filter((p) => p.headRef === name).pop();
     branches.push({
       name,
@@ -84,15 +73,9 @@ export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
       ahead: ab.ahead,
       behind: ab.behind,
       mergeBase: target ? graph.mergeBase(b.headSha, target.headSha) : null,
-      merged: m
-        ? {
-            via: 'pr',
-            prNumber: m.pr.number,
-            method: m.pr.mergeMethod ?? null,
-            into: m.pr.baseRef,
-            newCommits: m.newCommits,
-          }
-        : null,
+      merged: isDefault
+        ? null
+        : detectMerged({ graph, branch: b, target, prs, content: content.get(name) }),
       pr: pr ? { number: pr.number, state: pr.state, baseRef: pr.baseRef } : null,
       ci: ci.get(b.headSha) ?? 'none',
       recorded: b.recorded ?? false,
