@@ -217,4 +217,5 @@ local workaround. The owner applies approved changes on `main`; then rebase.
   commit it produced.
 - **Workaround in use:** `layoutTree(snapshot, graph, squashShas)` takes the set; the page passes an empty
   set, so squash commits draw as normal circles until this lands.
-- **Status:** proposed
+- **Status:** applied as `mergeCommitSha: Sha.nullable().default(null)` (PR fix/shared-tree-merge-commit-sha).
+  T3a fills it in `@app/git-graph`; T4 passes the squash SHAs to `layoutTree`.

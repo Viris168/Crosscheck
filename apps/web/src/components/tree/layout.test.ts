@@ -121,6 +121,7 @@ describe('labels', () => {
         method: null,
         into: 'main',
         newCommits: 0,
+        mergeCommitSha: null,
       },
     };
     expect(mergeNote(content, m)?.text).toBe('content in main (rebased)');
