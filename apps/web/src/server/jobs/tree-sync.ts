@@ -802,6 +802,7 @@ export const prismaTreeStore: TreeStore = {
         state: true,
         headSha: true,
         mergeCommitSha: true,
+        author: true,
       },
     });
     // No mergeMethod: GitHub's PR API doesn't give it; `detectMerged` infers it from the graph.

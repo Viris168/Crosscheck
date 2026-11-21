@@ -8,7 +8,7 @@ import {
   TreeSnapshotSchema,
   type TreeSnapshot,
 } from '@app/shared';
-import { isComputed, MINE_PRS_HEADER } from '@/components/tree/scale-contract';
+import { isComputed } from '@/components/tree/scale-contract';
 import { canEditRepo, requireRepoAccess } from '@/lib/server/access';
 import { json, queryOf, route } from '@/lib/server/http';
 import { requireSession } from '@/server/auth';
@@ -96,17 +96,10 @@ async function fillVisible(
   };
 }
 
-/** PR numbers in the snapshot that the viewer opened (the "mine" filter). Best effort. */
-async function minePrs(userId: string, repoId: string, snapshot: TreeSnapshot): Promise<number[]> {
-  const numbers = [...new Set(snapshot.branches.flatMap((b) => (b.pr ? [b.pr.number] : [])))];
-  if (!numbers.length) return [];
+/** The viewer's GitHub login (the "mine" filter compares it with `pr.author`). Best effort. */
+async function viewerLogin(userId: string): Promise<string | null> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { login: true } });
-  if (!user?.login) return [];
-  const rows = await prisma.pullRequest.findMany({
-    where: { repoId, author: user.login, number: { in: numbers } },
-    select: { number: true },
-  });
-  return rows.map((r) => r.number).sort((a, b) => a - b);
+  return user?.login ?? null;
 }
 
 /**
@@ -183,9 +176,7 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
   // Overrides show right away: re-pick compare-with on the stored graph instead of waiting for a sync.
   const stored = parsed?.success ? await withOverrides(repoId, parsed.data, overrides) : null;
   const snapshot = stored && visible?.length ? await fillVisible(repo, stored, visible) : stored;
-  const mine = snapshot
-    ? await minePrs(session.user.id, repoId, snapshot).catch(() => [] as number[])
-    : [];
+  const login = await viewerLogin(session.user.id).catch(() => null);
 
   return json(
     GetTreeResponse,
@@ -195,7 +186,8 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
       errorCode: unreadable ? (graph.errorCode ?? 'internal') : graph.errorCode,
       snapshot,
       canEdit,
+      viewerLogin: login,
     },
-    { headers: { ...headers, [MINE_PRS_HEADER]: mine.join(',') } },
+    { headers },
   );
 });

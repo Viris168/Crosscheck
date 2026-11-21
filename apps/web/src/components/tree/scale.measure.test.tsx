@@ -36,7 +36,7 @@ describe.runIf(process.env.TREE_SCALE_MEASURE === '1')('tree scale (page)', () =
     t = performance.now();
     const graph = new TreeGraph(snap.commits);
     out.push(`TreeGraph (${snap.commits.length} commits): ${ms(t)}`);
-    const ctx = { minePrs: new Set<number>(), headTime: () => null, now: Date.now() };
+    const ctx = { viewerLogin: null, headTime: () => null, now: Date.now() };
     t = performance.now();
     const rows = viewRows(snap, {
       view: EMPTY_VIEW,

@@ -43,9 +43,9 @@ export function viewSearch(view: TreeView, search = ''): string {
 }
 
 export type MatchContext = {
-  /** PR numbers the viewer opened (GET /tree `x-tree-mine-prs`). */
-  minePrs: ReadonlySet<number>;
-  /** Commit time (ms) of a head SHA, or null when the snapshot does not carry that commit. */
+  /** The viewer's GitHub login (GET /tree `viewerLogin`); "mine" = PRs they authored. */
+  viewerLogin: string | null;
+  /** Commit time (ms) of a head SHA from the drawn commits: the fallback for older snapshots. */
   headTime: (sha: string) => number | null;
   now: number;
 };
@@ -53,7 +53,7 @@ export type MatchContext = {
 export function matchesFilter(b: BranchNode, f: TreeFilter, ctx: MatchContext): boolean {
   switch (f) {
     case 'mine':
-      return b.pr !== null && ctx.minePrs.has(b.pr.number);
+      return ctx.viewerLogin !== null && b.pr?.author === ctx.viewerLogin;
     case 'open-pr':
       return b.pr?.state === 'open';
     case 'ci-failing':
@@ -61,9 +61,9 @@ export function matchesFilter(b: BranchNode, f: TreeFilter, ctx: MatchContext): 
     case 'merged':
       return b.merged !== null;
     case 'stale': {
-      // VERIFY: head commit time comes from the drawn commits; a head the snapshot did not draw
-      // counts as not stale (see CONTRACT_REQUESTS "[Task T6b] headCommittedAt").
-      const t = ctx.headTime(b.headSha);
+      // `headCommittedAt` from the engine; snapshots written before it fall back to the drawn commits.
+      const at = b.headCommittedAt ? Date.parse(b.headCommittedAt) : NaN;
+      const t = Number.isFinite(at) ? at : ctx.headTime(b.headSha);
       return t !== null && ctx.now - t > STALE_DAYS * DAY_MS;
     }
   }

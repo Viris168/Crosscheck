@@ -90,6 +90,7 @@ export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
     branches.push({
       name,
       headSha: b.headSha,
+      headCommittedAt: graph.has(b.headSha) ? graph.commit(b.headSha).committedAt : null,
       isDefault,
       compareWith: c.compareWith,
       why: c.why,
@@ -102,7 +103,9 @@ export function buildSnapshot(input: SnapshotInput): TreeSnapshot {
       merged: isDefault
         ? null
         : detectMerged({ graph, branch: b, target, prs, content: content.get(name) }),
-      pr: pr ? { number: pr.number, state: pr.state, baseRef: pr.baseRef } : null,
+      pr: pr
+        ? { number: pr.number, state: pr.state, baseRef: pr.baseRef, author: pr.author ?? null }
+        : null,
       ci: ci.get(b.headSha) ?? 'none',
       recorded: b.recorded ?? false,
     });

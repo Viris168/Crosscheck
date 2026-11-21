@@ -13,7 +13,7 @@ import {
 
 const NOW = Date.parse('2026-11-20T10:00:00Z');
 const ctx = (over: Partial<MatchContext> = {}): MatchContext => ({
-  minePrs: new Set(),
+  viewerLogin: null,
   headTime: () => NOW,
   now: NOW,
   ...over,
@@ -100,13 +100,28 @@ describe('viewRows', () => {
     expect(f({ q: '', f: ['open-pr'] })).toEqual(['feature/login', 'hotfix/header']);
     expect(f({ q: '', f: ['ci-failing'] })).toEqual(['hotfix/header']);
     expect(f({ q: '', f: ['merged'] })).toEqual(['chore/readme']);
-    expect(f({ q: '', f: ['mine'] }, { minePrs: new Set([2]) })).toEqual(['feature/login']);
+    expect(f({ q: '', f: ['mine'] }, { viewerLogin: 'linh' })).toEqual(['feature/login']);
+    expect(f({ q: '', f: ['mine'] })).toEqual([]); // signed out of GitHub: nothing is mine
     const old = (sha: string) => (sha === SEED_SHA.a1 ? NOW - 31 * 86_400_000 : NOW);
     expect(f({ q: '', f: ['stale'] }, { headTime: old })).toEqual(['hotfix/header']);
     expect(f({ q: '', f: ['stale', 'open-pr'] }, { headTime: old })).toEqual(['hotfix/header']);
     expect(f({ q: 'login', f: ['ci-failing'] })).toEqual([]);
     // Unknown head time is not stale.
     expect(f({ q: '', f: ['stale'] }, { headTime: () => null })).toEqual([]);
+    // headCommittedAt from the engine wins over the drawn-commit fallback.
+    const dated = {
+      ...s,
+      branches: s.branches.map((b) =>
+        b.name === 'dev'
+          ? { ...b, headCommittedAt: new Date(NOW - 40 * 86_400_000).toISOString() }
+          : b,
+      ),
+    };
+    expect(
+      viewRows(dated, state({ view: { q: '', f: ['stale'] }, ctx: ctx({ headTime: () => null }) }))
+        .filter((r) => r.kind === 'branch' && !r.context)
+        .map((r) => (r.kind === 'branch' ? r.branch.name : '')),
+    ).toEqual(['dev']);
   });
 
   it('handles 500 branches with deep stacks without recursion', () => {
