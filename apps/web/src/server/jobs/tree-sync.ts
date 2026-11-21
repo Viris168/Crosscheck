@@ -1,0 +1,615 @@
+// tree-sync (`tree/sync-requested`): refresh a repo's branches, PRs, CI and commits-only clone, then write
+// the `RepoGraph` snapshot the Branches page draws (tasks/T-branch-tree.md, T2c).
+// Privacy: Inngest persists step outputs, so every step returns counts only: never commits, SHAs lists,
+// branch names, PR titles or the repo name. Each step re-reads what it needs from the DB.
+import { prisma } from '@app/db';
+import { buildSnapshot, type CommitInput, type PrRecord } from '@app/git-graph';
+import {
+  TREE_MAX_BRANCHES,
+  TREE_MAX_COMMITS,
+  TreeSnapshotSchema,
+  type CiState,
+  type ErrorCode,
+  type TreeSnapshot,
+  type TreeSyncReason,
+} from '@app/shared';
+import type { JobLogger } from './deps';
+import { errorCodeOf, errorMessageOf, nonRetriable, retriable } from './errors';
+import { RepoBusyError, type CacheRepo, type GitAuth } from './repo-cache';
+
+type Reason = (typeof TreeSyncReason)[number];
+
+// --- GitHub reads (T2b's `@app/github` tree functions, bound to one installation) ---
+
+/** Mirrors T2b's `TreePr` (tasks/T2b-github-reads.md). */
+export interface TreePr {
+  number: number;
+  state: 'open' | 'closed' | 'merged';
+  headRef: string;
+  headSha: string;
+  baseRef: string;
+  baseSha: string | null;
+  mergedAt: string | Date | null;
+  mergeCommitSha: string | null;
+  title: string;
+  author: string;
+  updatedAt: string | Date;
+}
+
+export interface TreeRepo extends CacheRepo {
+  id: string;
+  orgId: string;
+  fullName: string;
+  githubInstallationId: number;
+}
+
+export interface TreeGithub {
+  listBranches(
+    repo: TreeRepo,
+  ): Promise<{ defaultBranch: string; branches: { name: string; headSha: string }[] }>;
+  listPullRequests(repo: TreeRepo): Promise<TreePr[]>;
+  fetchCiState(
+    repo: TreeRepo,
+    sha: string,
+  ): Promise<{ state: CiState; counts: Record<string, number> }>;
+  gitAuth(repo: TreeRepo): Promise<GitAuth>;
+}
+
+export interface TreeCache {
+  ensureClone(repo: CacheRepo, auth: GitAuth): Promise<{ action: string }>;
+  /** Commits reachable from `heads`; heads not in the clone are reported in `missing`. */
+  readGraph(
+    repo: CacheRepo,
+    heads: readonly string[],
+  ): Promise<{
+    commits: CommitInput[];
+    truncated: boolean;
+    missing: ReadonlySet<string>;
+  }>;
+}
+
+// --- DB access ---
+
+export interface LiveBranch {
+  name: string;
+  headSha: string;
+  isDefault: boolean;
+  recordedParents: string[];
+  recordedAt: Date | null;
+}
+
+export interface ExistingBranch {
+  name: string;
+  headSha: string;
+  isDefault: boolean;
+  deletedAt: Date | null;
+}
+
+export interface ExistingPr {
+  number: number;
+  state: TreePr['state'];
+  headSha: string;
+  baseRef: string;
+  baseSha: string | null;
+  mergedAt: Date | null;
+  mergeCommitSha: string | null;
+}
+
+export interface TreeStore {
+  getRepo(repoId: string): Promise<(TreeRepo & { active: boolean }) | null>;
+  setSyncing(repoId: string): Promise<void>;
+  setFailed(repoId: string, code: ErrorCode): Promise<void>;
+  applyBranches(repoId: string, plan: BranchPlan, now: Date): Promise<void>;
+  existingBranches(repoId: string): Promise<ExistingBranch[]>;
+  applyPrs(repoId: string, plan: PrPlan): Promise<void>;
+  existingPrs(repoId: string, numbers: number[]): Promise<ExistingPr[]>;
+  /** Live branches: default first, then most recently moved. */
+  liveBranches(repoId: string): Promise<LiveBranch[]>;
+  terminalCiShas(repoId: string, shas: string[]): Promise<Set<string>>;
+  saveCi(
+    repoId: string,
+    sha: string,
+    ci: { state: CiState; counts: Record<string, number> },
+  ): Promise<void>;
+  ciStates(repoId: string, shas: string[]): Promise<Map<string, CiState>>;
+  prRecords(repoId: string): Promise<PrRecord[]>;
+  overrides(repoId: string): Promise<Record<string, string>>;
+  saveSnapshot(
+    repoId: string,
+    data: { defaultBranch: string; snapshot: TreeSnapshot; syncedAt: Date },
+  ): Promise<void>;
+}
+
+export interface TreeSyncDeps {
+  store: TreeStore;
+  github: TreeGithub;
+  cache: TreeCache;
+  now(): Date;
+  log: JobLogger;
+}
+
+export interface TreeSyncStep {
+  run<T>(id: string, fn: () => Promise<T>): Promise<T>;
+}
+
+export interface TreeSyncEvent {
+  repoId: string;
+  orgId: string;
+  reason: Reason;
+}
+
+export type TreeSyncResult =
+  | { status: 'ready'; branches: number; commits: number; truncated: boolean }
+  | { status: 'skipped'; reason: 'repo_missing' | 'busy' }
+  | { status: 'failed'; errorCode: ErrorCode };
+
+/** CI is fetched for at most this many branch heads per run. */
+export const CI_MAX_PER_RUN = 200;
+const CI_PARALLEL = 4;
+/** Terminal CI states are cached forever per SHA; pending / none are fetched again. */
+export const TERMINAL_CI: readonly CiState[] = ['success', 'failure', 'neutral'];
+/** Per-branch commit caps tried in order until the snapshot fits `TREE_MAX_COMMITS`. */
+const COMMIT_CAPS = [50, 20, 10, 5, 2];
+
+export async function treeSyncHandler(
+  ctx: { event: { data: TreeSyncEvent }; step: TreeSyncStep },
+  deps: TreeSyncDeps,
+): Promise<TreeSyncResult> {
+  const { repoId, reason } = ctx.event.data;
+  const { step } = ctx;
+  const { store, github, cache, log } = deps;
+
+  const loadRepo = async (): Promise<TreeRepo> => {
+    const repo = await store.getRepo(repoId);
+    if (!repo || !repo.active) throw nonRetriable('internal', 'repo missing or inactive');
+    return repo;
+  };
+
+  try {
+    const refs = await step.run('load-refs', async () => {
+      const repo = await store.getRepo(repoId);
+      if (!repo || !repo.active) return { skipped: true as const };
+      await store.setSyncing(repoId);
+      const [listed, prs] = await Promise.all([
+        githubCall(() => github.listBranches(repo), 'branch list failed'),
+        githubCall(() => github.listPullRequests(repo), 'pull request list failed'),
+      ]);
+      const branchPlan = planBranches(
+        await store.existingBranches(repoId),
+        listed.branches,
+        listed.defaultBranch,
+      );
+      await store.applyBranches(repoId, branchPlan, deps.now());
+      const prPlan = planPrs(
+        await store.existingPrs(
+          repoId,
+          prs.map((p) => p.number),
+        ),
+        prs,
+      );
+      await store.applyPrs(repoId, prPlan);
+      return {
+        skipped: false as const,
+        branches: listed.branches.length,
+        branchesCreated: branchPlan.create.length,
+        branchesUpdated: branchPlan.update.length,
+        branchesDeleted: branchPlan.softDelete.length,
+        prs: prs.length,
+        prsCreated: prPlan.create.length,
+        prsUpdated: prPlan.update.length,
+      };
+    });
+    if (refs.skipped) {
+      log.warn({ repoId, reason }, 'tree-sync skipped: repo missing or inactive');
+      return { status: 'skipped', reason: 'repo_missing' };
+    }
+
+    await step.run('fetch', async () => {
+      const repo = await loadRepo();
+      const auth = await githubCall(() => github.gitAuth(repo), 'git token failed');
+      await cache.ensureClone(repo, auth);
+      return { ok: true };
+    });
+
+    await step.run('ci', async () => {
+      const heads = unique((await store.liveBranches(repoId)).map((b) => b.headSha));
+      const terminal = await store.terminalCiShas(repoId, heads);
+      const todo = heads.filter((s) => !terminal.has(s)).slice(0, CI_MAX_PER_RUN);
+      const repo = todo.length ? await loadRepo() : null;
+      await mapLimit(todo, CI_PARALLEL, async (sha) => {
+        const ci = await githubCall(() => github.fetchCiState(repo!, sha), 'CI read failed');
+        await store.saveCi(repoId, sha, ci);
+      });
+      return {
+        heads: heads.length,
+        cached: terminal.size,
+        fetched: todo.length,
+        deferred: heads.length - terminal.size - todo.length,
+      };
+    });
+
+    const snap = await step.run('snapshot', async () => {
+      const repo = await loadRepo();
+      const all = await store.liveBranches(repoId);
+      const def = all.find((b) => b.isDefault);
+      if (!def) throw nonRetriable('internal', 'repo has no default branch');
+      const capped = all.slice(0, TREE_MAX_BRANCHES);
+      const graph = await cache.readGraph(repo, unique(capped.map((b) => b.headSha)));
+      // A head the clone lacks moved after `fetch` (force-push in between): leave it for the next sync.
+      if (graph.missing.has(def.headSha))
+        throw retriable('github_error', 'default branch head not in clone yet');
+      const branches = capped.filter((b) => !graph.missing.has(b.headSha));
+      const [prs, overrides, ci] = await Promise.all([
+        store.prRecords(repoId),
+        store.overrides(repoId),
+        store.ciStates(repoId, unique(branches.map((b) => b.headSha))),
+      ]);
+      const truncated = graph.truncated || capped.length < all.length;
+      let snapshot: TreeSnapshot | undefined;
+      for (const cap of COMMIT_CAPS) {
+        const built = buildSnapshot({
+          defaultBranch: def.name,
+          branches: branches.map((b) => ({
+            name: b.name,
+            headSha: b.headSha,
+            recordedParents: b.recordedParents,
+            recorded: b.recordedAt !== null,
+          })),
+          graph: graph.commits,
+          prs,
+          overrides,
+          ci,
+          truncated,
+          maxCommitsPerBranch: cap,
+        });
+        if (built.commits.length <= TREE_MAX_COMMITS || cap === COMMIT_CAPS.at(-1)) {
+          if (built.commits.length > TREE_MAX_COMMITS) {
+            built.commits = built.commits.slice(-TREE_MAX_COMMITS);
+            built.truncated = true;
+          }
+          const parsed = TreeSnapshotSchema.safeParse(built);
+          // No zod details: issues can quote branch names.
+          if (!parsed.success) throw nonRetriable('internal', 'snapshot failed validation');
+          snapshot = parsed.data;
+          break;
+        }
+      }
+      await store.saveSnapshot(repoId, {
+        defaultBranch: def.name,
+        snapshot: snapshot!,
+        syncedAt: deps.now(),
+      });
+      return {
+        branches: snapshot!.branches.length,
+        commits: snapshot!.commits.length,
+        skippedBranches: capped.length - branches.length,
+        truncated: snapshot!.truncated,
+      };
+    });
+
+    log.info({ repoId, reason, ...snap }, 'tree-sync done');
+    return {
+      status: 'ready',
+      branches: snap.branches,
+      commits: snap.commits,
+      truncated: snap.truncated,
+    };
+  } catch (err) {
+    if (errorMessageOf(err) === errorMessageOf(new RepoBusyError())) {
+      // Another sync owns the clone and will write the snapshot; don't mark this repo failed.
+      log.warn({ repoId, reason }, 'tree-sync skipped: clone busy');
+      return { status: 'skipped', reason: 'busy' };
+    }
+    const code = errorCodeOf(err);
+    await step.run('mark-failed', async () => {
+      await store.setFailed(repoId, code);
+      return { errorCode: code };
+    });
+    // errorMessageOf: our own messages; git errors are scrubbed of tokens by runGit.
+    log.error({ repoId, reason, errorCode: code, err: errorMessageOf(err) }, 'tree-sync failed');
+    return { status: 'failed', errorCode: code };
+  }
+}
+
+// --- planning (pure) ---
+
+export interface BranchPlan {
+  create: { name: string; headSha: string; isDefault: boolean }[];
+  /** existing rows that moved, changed default-ness, or came back after a delete */
+  update: { name: string; headSha: string; isDefault: boolean; restored: boolean }[];
+  /** names to soft-delete (`deletedAt = now`) */
+  softDelete: string[];
+}
+
+export function planBranches(
+  existing: readonly ExistingBranch[],
+  incoming: readonly { name: string; headSha: string }[],
+  defaultBranch: string,
+): BranchPlan {
+  const byName = new Map(existing.map((b) => [b.name, b]));
+  const seen = new Set<string>();
+  const plan: BranchPlan = { create: [], update: [], softDelete: [] };
+  for (const b of incoming) {
+    if (seen.has(b.name)) continue;
+    seen.add(b.name);
+    const isDefault = b.name === defaultBranch;
+    const row = byName.get(b.name);
+    if (!row) plan.create.push({ name: b.name, headSha: b.headSha, isDefault });
+    else if (row.deletedAt || row.headSha !== b.headSha || row.isDefault !== isDefault)
+      plan.update.push({ name: b.name, headSha: b.headSha, isDefault, restored: !!row.deletedAt });
+  }
+  for (const row of existing)
+    if (!row.deletedAt && !seen.has(row.name)) plan.softDelete.push(row.name);
+  return plan;
+}
+
+export interface PrPlan {
+  create: TreePr[];
+  update: TreePr[];
+}
+
+/** Only the tree fields are compared/updated; title, body, reviews etc. belong to other lanes. */
+export function planPrs(existing: readonly ExistingPr[], incoming: readonly TreePr[]): PrPlan {
+  const byNumber = new Map(existing.map((p) => [p.number, p]));
+  const plan: PrPlan = { create: [], update: [] };
+  const seen = new Set<number>();
+  for (const pr of incoming) {
+    if (seen.has(pr.number)) continue;
+    seen.add(pr.number);
+    const row = byNumber.get(pr.number);
+    if (!row) plan.create.push(pr);
+    else if (
+      row.state !== pr.state ||
+      row.headSha !== pr.headSha ||
+      row.baseRef !== pr.baseRef ||
+      (row.baseSha ?? null) !== (pr.baseSha ?? null) ||
+      (row.mergeCommitSha ?? null) !== (pr.mergeCommitSha ?? null) ||
+      (row.mergedAt?.getTime() ?? null) !== (toDate(pr.mergedAt)?.getTime() ?? null)
+    )
+      plan.update.push(pr);
+  }
+  return plan;
+}
+
+// --- Prisma store ---
+
+const BATCH = 100;
+
+export const prismaTreeStore: TreeStore = {
+  async getRepo(repoId) {
+    const r = await prisma.repo.findUnique({
+      where: { id: repoId },
+      select: {
+        id: true,
+        orgId: true,
+        githubRepoId: true,
+        fullName: true,
+        active: true,
+        installation: { select: { githubInstallationId: true } },
+      },
+    });
+    if (!r) return null;
+    return {
+      id: r.id,
+      orgId: r.orgId,
+      githubRepoId: r.githubRepoId,
+      fullName: r.fullName,
+      active: r.active,
+      githubInstallationId: r.installation.githubInstallationId,
+    };
+  },
+
+  async setSyncing(repoId) {
+    await prisma.repoGraph.upsert({
+      where: { repoId },
+      create: { repoId, status: 'syncing' },
+      update: { status: 'syncing', errorCode: null },
+    });
+  },
+
+  async setFailed(repoId, code) {
+    // Keep the last good snapshot: the page shows it with the error.
+    await prisma.repoGraph.upsert({
+      where: { repoId },
+      create: { repoId, status: 'failed', errorCode: code },
+      update: { status: 'failed', errorCode: code },
+    });
+  },
+
+  existingBranches(repoId) {
+    return prisma.branch.findMany({
+      where: { repoId },
+      select: { name: true, headSha: true, isDefault: true, deletedAt: true },
+    });
+  },
+
+  async applyBranches(repoId, plan, now) {
+    for (const part of chunks(plan.create, BATCH)) {
+      await prisma.branch.createMany({
+        data: part.map((b) => ({ repoId, ...b })),
+        skipDuplicates: true,
+      });
+    }
+    for (const part of chunks(plan.update, BATCH)) {
+      await prisma.$transaction(
+        part.map((b) =>
+          prisma.branch.update({
+            where: { repoId_name: { repoId, name: b.name } },
+            data: {
+              headSha: b.headSha,
+              isDefault: b.isDefault,
+              deletedAt: null,
+              // A branch that comes back under an old name is a new branch: forget what was recorded.
+              ...(b.restored ? { recordedParents: [], recordedAt: null } : {}),
+            },
+          }),
+        ),
+      );
+    }
+    for (const part of chunks(plan.softDelete, BATCH)) {
+      await prisma.branch.updateMany({
+        where: { repoId, name: { in: part }, deletedAt: null },
+        data: { deletedAt: now, isDefault: false },
+      });
+    }
+  },
+
+  async existingPrs(repoId, numbers) {
+    const out: ExistingPr[] = [];
+    for (const part of chunks(numbers, 1000)) {
+      out.push(
+        ...(await prisma.pullRequest.findMany({
+          where: { repoId, number: { in: part } },
+          select: {
+            number: true,
+            state: true,
+            headSha: true,
+            baseRef: true,
+            baseSha: true,
+            mergedAt: true,
+            mergeCommitSha: true,
+          },
+        })),
+      );
+    }
+    return out;
+  },
+
+  async applyPrs(repoId, plan) {
+    const tree = (p: TreePr) => ({
+      state: p.state,
+      headSha: p.headSha,
+      baseRef: p.baseRef,
+      baseSha: p.baseSha,
+      mergedAt: toDate(p.mergedAt),
+      mergeCommitSha: p.mergeCommitSha,
+    });
+    for (const part of chunks(plan.create, BATCH)) {
+      // Reviews are never touched; a PR row created here gets its title/author from the list call.
+      await prisma.pullRequest.createMany({
+        data: part.map((p) => ({
+          repoId,
+          number: p.number,
+          title: p.title,
+          author: p.author,
+          headRef: p.headRef,
+          ...tree(p),
+        })),
+        skipDuplicates: true,
+      });
+    }
+    for (const part of chunks(plan.update, BATCH)) {
+      await prisma.$transaction(
+        part.map((p) =>
+          prisma.pullRequest.update({
+            where: { repoId_number: { repoId, number: p.number } },
+            data: tree(p),
+          }),
+        ),
+      );
+    }
+  },
+
+  async liveBranches(repoId) {
+    return prisma.branch.findMany({
+      where: { repoId, deletedAt: null },
+      orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }, { name: 'asc' }],
+      select: {
+        name: true,
+        headSha: true,
+        isDefault: true,
+        recordedParents: true,
+        recordedAt: true,
+      },
+    });
+  },
+
+  async terminalCiShas(repoId, shas) {
+    const rows = await prisma.commitCi.findMany({
+      where: { repoId, sha: { in: shas }, state: { in: [...TERMINAL_CI] } },
+      select: { sha: true },
+    });
+    return new Set(rows.map((r) => r.sha));
+  },
+
+  async saveCi(repoId, sha, ci) {
+    await prisma.commitCi.upsert({
+      where: { repoId_sha: { repoId, sha } },
+      create: { repoId, sha, state: ci.state, counts: ci.counts },
+      update: { state: ci.state, counts: ci.counts },
+    });
+  },
+
+  async ciStates(repoId, shas) {
+    const rows = await prisma.commitCi.findMany({
+      where: { repoId, sha: { in: shas } },
+      select: { sha: true, state: true },
+    });
+    return new Map(rows.map((r) => [r.sha, r.state]));
+  },
+
+  async prRecords(repoId) {
+    const rows = await prisma.pullRequest.findMany({
+      where: { repoId },
+      select: { number: true, headRef: true, baseRef: true, state: true, headSha: true },
+    });
+    // VERIFY(T3a): merge method is not stored yet; the PR rule works without it.
+    return rows.map((r) => ({ ...r, mergeMethod: null }));
+  },
+
+  async overrides(repoId) {
+    const rows = await prisma.compareOverride.findMany({
+      where: { repoId },
+      select: { branchName: true, compareWith: true },
+    });
+    return Object.fromEntries(rows.map((r) => [r.branchName, r.compareWith]));
+  },
+
+  async saveSnapshot(repoId, { defaultBranch, snapshot, syncedAt }) {
+    const data = {
+      status: 'ready' as const,
+      errorCode: null,
+      defaultBranch,
+      syncedAt,
+      snapshot: snapshot as unknown as object,
+    };
+    await prisma.repoGraph.upsert({ where: { repoId }, create: { repoId, ...data }, update: data });
+  },
+};
+
+// --- helpers ---
+
+/** GitHub API failures become retriable `github_error`s with a generic message (no repo/branch names). */
+async function githubCall<T>(fn: () => Promise<T>, message: string): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const code = errorCodeOf(err);
+    if (code === 'rate_limited' || code === 'timeout') throw retriable(code, message);
+    throw retriable('github_error', message);
+  }
+}
+
+function toDate(v: string | Date | null | undefined): Date | null {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function unique<T>(xs: readonly T[]): T[] {
+  return [...new Set(xs)];
+}
+
+function chunks<T>(xs: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
+  return out;
+}
+
+async function mapLimit<T>(xs: readonly T[], limit: number, fn: (x: T) => Promise<void>) {
+  let next = 0;
+  const worker = async () => {
+    while (next < xs.length) await fn(xs[next++]!);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, xs.length) }, worker));
+}
