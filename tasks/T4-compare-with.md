@@ -15,10 +15,12 @@
 2. **Recompute without a sync**: overrides must show immediately. In GET `/tree`, re-run `pickCompareWith`
    + `aheadBehind` on the stored snapshot's commit graph with the current overrides (pure, in-memory).
 3. **UI**:
-   - A "why" label on each row: Override · Open PR #n · Merged PR #n · Recorded · Nearest branch ·
-     Same commit as X · Default. Tooltip with one sentence per rule.
-   - One-click fix: a menu on the compare-with name listing the other branches (nearest first) + "Reset to
-     automatic". Hidden when `canEdit` is false. Optimistic update, rollback on error.
+   - The "why" short label in each row's sub-line, as in the prototype: `↑2 ↓1 vs dev · PR #2`
+     (set by hand · PR #n · recorded · ambiguous · guess · default), and the long form (`whyLong`) in the
+     branch details panel.
+   - One-click fix: the prototype's "Compare with" select in the branch details: "Automatic (PR target,
+     record or guess)" + every other branch. Hidden when `canEdit` is false. Optimistic update, rollback on
+     error.
 4. Log `{ repoId, whyBefore }` on each override (no branch names) so the team can see which rule picks wrong.
 
 ## Done when (milestone 4)

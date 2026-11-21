@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Repo tree simulator</title>
+<style>
+:root{--bg:#fafaf7;--panel:#ffffff;--text:#1f1e1d;--muted:#6b6a65;--border:#e3e1d9;--accent:#534AB7;--accent-bg:#EEEDFE;--ok:#0F6E56;--ok-bg:#E1F5EE;--fail:#A32D2D;--fail-bg:#FCEBEB;--warn:#854F0B;--warn-bg:#FAEEDA;--run:#185FA5;--run-bg:#E6F1FB;--line:#b4b2a9;--chip:#f1efe8}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1a18;--panel:#242422;--text:#ecebe6;--muted:#a3a29b;--border:#3a3a37;--accent:#AFA9EC;--accent-bg:#3C3489;--ok:#9FE1CB;--ok-bg:#085041;--fail:#F7C1C1;--fail-bg:#791F1F;--warn:#FAC775;--warn-bg:#633806;--run:#B5D4F4;--run-bg:#0C447C;--line:#5F5E5A;--chip:#2f2f2c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid var(--border);background:var(--panel)}
+header h1{font-size:18px;font-weight:600;margin:0 auto 0 0}
+label.inline{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+select,input[type=text]{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text)}
+button{font:inherit;font-size:13px;padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+button:disabled{opacity:.45;cursor:not-allowed}
+main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:20px;padding:20px 24px;max-width:1400px;margin:0 auto}
+@media (max-width:960px){main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px}
+.card h2{font-size:15px;font-weight:600;margin:0 0 12px}
+.tree-wrap{overflow-x:auto}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin-top:8px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+svg text{font-family:inherit}
+.t{font-size:13px;font-weight:600;fill:var(--text)}
+.s{font-size:12px;fill:var(--muted)}
+.m{font-size:11px;font-family:ui-monospace,Menlo,Consolas,monospace;fill:var(--muted)}
+[data-k]{cursor:pointer}
+.pop{animation:pop .6s ease-out}
+@keyframes pop{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+.pop{transform-box:fill-box;transform-origin:center}
+@media (prefers-reduced-motion:reduce){.pop{animation:none}}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:600;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.b-success,.b-merged{background:var(--ok-bg);color:var(--ok)}
+.b-failure,.b-closed{background:var(--fail-bg);color:var(--fail)}
+.b-pending{background:var(--warn-bg);color:var(--warn)}
+.b-running,.b-open{background:var(--run-bg);color:var(--run)}
+.b-neutral{background:var(--chip);color:var(--muted)}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:4px 10px;font-size:14px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;word-break:break-word}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;background:var(--chip);padding:1px 5px;border-radius:4px}
+.form{display:flex;flex-direction:column;gap:8px;padding-top:12px;margin-top:12px;border-top:1px solid var(--border)}
+.form .row{display:flex;gap:8px}
+.form .row>*{flex:1;min-width:0}
+.form .row>button{flex:0 0 auto}
+.form h3{font-size:13px;font-weight:600;margin:0;color:var(--muted)}
+.err{color:var(--fail);font-size:13px;min-height:0}
+.log{list-style:none;margin:0;padding:0;font-size:13px;max-height:260px;overflow:auto}
+.log li{padding:6px 0;border-bottom:1px solid var(--border);display:flex;gap:10px}
+.log li:last-child{border-bottom:0}
+.log time{color:var(--muted);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.ab{font-variant-numeric:tabular-nums;white-space:nowrap}
+.muted{color:var(--muted)}
+.mini{font-size:12px;padding:4px 8px}
+.matrix td,.matrix th{text-align:center;font-variant-numeric:tabular-nums}
+.matrix th:first-child,.matrix td:first-child{text-align:left}
+.b-cancelled{background:var(--chip);color:var(--muted)}
+.note{font-size:12px;color:var(--muted);margin:10px 0 0}
+g[data-k]{outline:none}
+g[data-k]:focus-visible>rect,g[data-k]:focus-visible>circle:not(.ci){stroke:var(--accent);stroke-width:3}
+code[data-k]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.w{font-size:11.5px;fill:var(--warn)}
+.o{font-size:11.5px;fill:var(--ok)}
+.tag{display:inline-block;margin-left:4px;padding:0 6px;border-radius:999px;font-size:11.5px;background:var(--ok-bg);color:var(--ok)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.why{display:block;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Repo tree simulator</h1>
+  <label class="inline">Repository <select id="repoSel" aria-label="Repository"></select></label>
+  <label class="inline">Acting as <select id="actor" aria-label="Acting as"></select></label>
+  <label class="inline">CI outcome <select id="ciMode" aria-label="CI outcome">
+    <option value="random">Random (75% pass)</option><option value="pass">Always pass</option><option value="fail">Always fail</option>
+  </select></label>
+  <label class="inline"><input type="checkbox" id="truth"> Show real parents</label>
+  <button id="reset" title="Restore demo data">Reset demo</button>
+</header>
+
+<main>
+  <div>
+    <section class="card">
+      <h2>Repository tree</h2>
+      <div class="tree-wrap"><svg id="tree" role="group" aria-label="Repository tree: repo, branches and commits"></svg></div>
+      <div class="legend">
+        <span><span class="dot" style="border:2px solid var(--accent)"></span>commit</span>
+        <span><span class="dot" style="background:var(--accent)"></span>merge commit</span>
+        <span><span class="dot" style="border:2px double var(--accent);width:14px;height:14px"></span>branch head</span>
+        <span><span class="dot" style="border:2px solid var(--accent);border-radius:3px"></span>squash commit</span>
+        <span><span class="dot" style="border:2px dashed var(--accent)"></span>rebased copy</span>
+        <span>↑ ahead / ↓ behind the branch it is compared with, and why that branch</span>
+        <span><span class="dot" style="background:var(--ok)"></span>CI passed <span class="dot" style="background:var(--fail);margin-left:8px"></span>failed <span class="dot" style="background:var(--warn);margin-left:8px"></span>pending</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Pull requests</h2>
+      <div style="overflow-x:auto"><table id="prs"></table></div>
+      <p class="note">Merging needs a passing CI run, like a GitHub branch protection rule with a required status check (GitHub does not require this by default). Pick a merge method per PR. Squash and rebase put <i>new</i> commits on the target, so Git still counts the source branch as ahead; the tree marks it merged from the PR record instead.</p>
+    </section>
+
+    <section class="card">
+      <h2>How far apart are the branches?</h2>
+      <p class="muted" style="margin:0 0 10px;font-size:13px">Each cell: how many commits the <b>row</b> branch is ahead (↑) and behind (↓) the <b>column</b> branch. <span class="tag">✓</span> means the ahead commits' changes are already in the column branch (squashed or rebased).</p>
+      <div style="overflow-x:auto"><table class="matrix" id="matrix"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>Activity (before → after)</h2>
+      <ul class="log" id="log"></ul>
+    </section>
+  </div>
+
+  <aside>
+    <section class="card" id="details"></section>
+    <section class="card">
+      <h2>Compare branches</h2>
+      <div class="row" style="display:flex;gap:8px;align-items:center">
+        <select id="cmpA" aria-label="Branch A" style="flex:1;min-width:0"></select>
+        <span class="muted">vs</span>
+        <select id="cmpB" aria-label="Branch B" style="flex:1;min-width:0"></select>
+      </div>
+      <div id="cmpOut" style="margin-top:12px;font-size:14px"></div>
+    </section>
+  </aside>
+</main>
+
+<script>
+(() => {
+const USERS = ['linh', 'minh', 'an', 'you'];
+const MAX_SHOWN = 7;
+const CI_MS = 1400;
+const SEED = 20261121;
+const LONG_LIVED = /^(main|master|dev|develop|staging|release\/.+)$/;
+const METHOD = {merge: 'merge commit', squash: 'squash', rebase: 'rebase'};
+let T = 0, rand = Math.random, runSeq = 0, CM = null;
+const tick = () => ++T;
+// Seeded PRNG so "Reset demo" replays the same commit ids and CI results.
+function mulberry32(a) {
+  return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+const hex = () => Array.from({length: 7}, () => '0123456789abcdef'[Math.floor(rand() * 16)]).join('');
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const now = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+// Prototype-free maps, so branch names like "constructor" or "__proto__" are ordinary keys.
+const dict = () => Object.create(null);
+
+/* A repo keeps two kinds of parent data:
+   createdFrom: the truth, which only this demo knows (Git never records it); shown with "Show real parents".
+   recorded:    what a webhook could have seen when the branch appeared: the branches whose head was that commit. */
+function mkRepo(name, def) {
+  return {name, def, commits: dict(), branches: dict(), createdFrom: dict(), recorded: dict(), override: dict(),
+    reachCache: new Map(), contentCache: new Map(), prs: [], log: [], prSeq: 1};
+}
+/* Each commit carries a patch id (what `git patch-id` gives: an id of the change itself) and the set of changes it
+   contains. A rebased copy keeps its original's patch id; a squash commit gets a new patch id but contains all the
+   squashed changes; a merge commit has no patch of its own. */
+function mk(r, parents, msg, author, extra = {}) {
+  let id; do id = hex(); while (id in r.commits);
+  const patch = 'patch' in extra ? extra.patch : parents.length > 1 ? null : hex();
+  r.commits[id] = {id, parents, msg, author, t: tick(), kind: 'normal', ...extra, patch, changes: extra.changes || (patch ? [patch] : [])};
+  return id;
+}
+const hasBranch = (r, name) => name != null && name in r.branches;
+const isLongLived = (r, b) => b === r.def || LONG_LIVED.test(b);
+
+function seedWeb() {
+  const r = mkRepo('web-app', 'main');
+  const c1 = mk(r, [], 'Initial commit', 'an');
+  const c2 = mk(r, [c1], 'Add landing page', 'an');
+  const r1 = mk(r, [c2], 'Update README', 'an');
+  const c3 = mk(r, [c2], 'Set up CI workflow', 'minh');
+  const c4 = mk(r, [c3], 'Update README (#1)', 'an', {kind: 'squash', squashOf: [r1], changes: [...r.commits[r1].changes]});
+  const d1 = mk(r, [c4], 'Add API client', 'linh');
+  const d2 = mk(r, [d1], 'Configure env vars', 'minh');
+  const f1 = mk(r, [d1], 'Login form UI', 'linh');
+  const f2 = mk(r, [f1], 'Validate credentials', 'linh');
+  const f3 = mk(r, [f2], 'Remember-me option', 'linh');
+  const o1 = mk(r, [f2], 'Sign in with GitHub button', 'you');
+  const h1 = mk(r, [c4], 'Fix header overflow', 'minh');
+  Object.assign(r.branches, {'main': c4, 'chore/readme': r1, 'dev': d2, 'feature/login': f3, 'feature/login-oauth': o1, 'hotfix/header': h1});
+  Object.assign(r.createdFrom, {'chore/readme': 'main', 'dev': 'main', 'feature/login': 'dev', 'feature/login-oauth': 'feature/login', 'hotfix/header': 'main'});
+  r.prs = [
+    {id:1, title:'Update README', author:'an', src:'chore/readme', tgt:'main', status:'merged', ci:'success', mergedBy:'an', mergeMethod:'squash', mergedHead:r1, mergeCommit:c4},
+    {id:2, title:'Login page', author:'linh', src:'feature/login', tgt:'dev', status:'open', ci:'success'},
+    {id:3, title:'Fix header overflow', author:'minh', src:'hotfix/header', tgt:'main', status:'open', ci:'failure'}
+  ];
+  r.prSeq = 4;
+  log(r, 'Demo data loaded for web-app (branches made before the webhook was watching, so nothing was recorded)');
+  return r;
+}
+function seedApi() {
+  const r = mkRepo('api-server', 'main');
+  const m1 = mk(r, [], 'Initial commit', 'minh');
+  const m2 = mk(r, [m1], 'Add health endpoint', 'minh');
+  const s1 = mk(r, [m2], 'Write setup guide', 'an');
+  const s2 = mk(r, [s1], 'Add env var table', 'an');
+  const m3 = mk(r, [m2], 'Add Dockerfile', 'an');
+  const s1c = mk(r, [m3], 'Write setup guide', 'an', {kind: 'rebase', copyOf: s1, patch: r.commits[s1].patch});
+  const s2c = mk(r, [s1c], 'Add env var table', 'an', {kind: 'rebase', copyOf: s2, patch: r.commits[s2].patch});
+  const a1 = mk(r, [m2], 'Add users route', 'linh');
+  const a2 = mk(r, [a1], 'Add pagination', 'linh');
+  const x1 = mk(r, [a2], 'Rate limit middleware', 'you');
+  Object.assign(r.branches, {'main': s2c, 'docs/setup': s2, 'dev': a2, 'feature/rate-limit': x1});
+  Object.assign(r.createdFrom, {'docs/setup': 'main', 'dev': 'main', 'feature/rate-limit': 'dev'});
+  r.prs = [
+    {id:1, title:'Release users API', author:'linh', src:'dev', tgt:'main', status:'open', ci:'pending'},
+    {id:2, title:'Rate limiting', author:'you', src:'feature/rate-limit', tgt:'dev', status:'open', ci:'success'},
+    {id:3, title:'Setup docs', author:'an', src:'docs/setup', tgt:'main', status:'merged', ci:'success', mergedBy:'minh', mergeMethod:'rebase', mergedHead:s2, mergeCommit:s2c}
+  ];
+  r.prSeq = 4;
+  log(r, 'Demo data loaded for api-server');
+  return r;
+}
+
+let repos, cur, sel, fresh = new Set(), cmp = {a:null, b:null};
+const R = () => repos[cur];
+const actor = () => $('#actor').value;
+const showTruth = () => $('#truth').checked;
+
+/* ---------- graph algorithms ---------- */
+// Commits never change, so what a commit can reach (and the changes it contains) can be cached for good.
+function reach(r, id) {
+  let seen = r.reachCache.get(id);
+  if (seen) return seen;
+  seen = new Set();
+  const stack = [id];
+  while (stack.length) { const x = stack.pop(); if (!x || seen.has(x)) continue; seen.add(x); stack.push(...r.commits[x].parents); }
+  r.reachCache.set(id, seen);
+  return seen;
+}
+function contentOf(r, id) {
+  let all = r.contentCache.get(id);
+  if (all) return all;
+  all = new Set();
+  reach(r, id).forEach(x => r.commits[x].changes.forEach(ch => all.add(ch)));
+  r.contentCache.set(id, all);
+  return all;
+}
+const byTime = r => (x, y) => r.commits[x].t - r.commits[y].t;
+function aheadBehind(r, a, b) {
+  const A = reach(r, r.branches[a]), B = reach(r, r.branches[b]);
+  return { ahead: [...A].filter(x => !B.has(x)).sort(byTime(r)), behind: [...B].filter(x => !A.has(x)).sort(byTime(r)) };
+}
+/* For each commit only on branch a: is its change already in branch b?
+   'patch'   another commit in b has the same patch id (rebased or cherry-picked; what `git cherry` finds)
+   'content' its changes are inside a squash commit in b (what a test merge, `git merge-tree`, finds)
+   'merge'   a merge commit, which adds no change of its own
+   'new'     not in b */
+function equivalence(r, a, b) {
+  const {ahead} = aheadBehind(r, a, b), head = r.branches[b], inB = reach(r, head), content = contentOf(r, head);
+  const patches = new Map();
+  inB.forEach(id => { const p = r.commits[id].patch; if (p && !patches.has(p)) patches.set(p, id); });
+  return ahead.map(id => {
+    const c = r.commits[id];
+    if (!c.patch) return {id, kind: 'merge'};
+    if (patches.has(c.patch)) return {id, kind: 'patch', twin: patches.get(c.patch)};
+    if (c.changes.every(ch => content.has(ch))) {
+      const holder = [...inB].find(x => r.commits[x].kind === 'squash' && c.changes.every(ch => r.commits[x].changes.includes(ch)));
+      return {id, kind: 'content', holder};
+    }
+    return {id, kind: 'new'};
+  });
+}
+// Is everything on a already in b by content? Returns 'rebased', 'squashed' or null.
+function contentMerged(r, a, b) {
+  const eq = equivalence(r, a, b);
+  if (!eq.length || eq.some(e => e.kind === 'new')) return null;
+  return eq.every(e => e.kind !== 'content') ? 'rebased' : 'squashed';
+}
+// Merge state from the PR record: the cheap, reliable signal GitHub gives for squash and rebase merges.
+function prMerge(r, b) {
+  const p = r.prs.filter(x => x.src === b && x.status === 'merged').pop();
+  if (!p) return null;
+  const head = r.branches[b];
+  if (p.mergedHead === head) return {p, extra: 0};
+  const since = reach(r, p.mergedHead);
+  return {p, extra: [...reach(r, head)].filter(x => !since.has(x)).length};
+}
+
+/* ---------- which branch to compare with ---------- */
+const better = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };
+function closest(r, b, candidates) {
+  let best = null;
+  candidates.forEach(x => {
+    const {ahead, behind} = aheadBehind(r, b, x);
+    const score = [ahead.length, x === r.def ? 0 : 1, isLongLived(r, x) ? 0 : 1, behind.length, x];
+    if (!best || better(score, best.score)) best = {x, score};
+  });
+  return best && best.x;
+}
+/* Guess from the graph alone. Long-lived branches (main, dev, release/*) keep moving after you branch off them, so
+   they are always candidates. A feature branch is a candidate only if this branch still contains its head, i.e. this
+   branch was cut from it (stacked) and it has not moved on since. Then pick the one this branch is fewest commits beyond. */
+function inferBase(r, b) {
+  const head = r.branches[b], mine = reach(r, head);
+  const cands = Object.keys(r.branches).filter(x => x !== b &&
+    (isLongLived(r, x) || (r.branches[x] !== head && mine.has(r.branches[x]))));
+  return closest(r, b, cands);
+}
+// Rules in priority order: set by hand > PR target > recorded at creation > inferred > default branch.
+function chooseBase(r, b) {
+  const live = x => hasBranch(r, x) && x !== b;
+  if (live(r.override[b])) return {base: r.override[b], rule: 'manual'};
+  const prs = r.prs.filter(p => p.src === b && live(p.tgt));
+  const pr = prs.filter(p => p.status === 'open').pop() || prs.filter(p => p.status === 'merged').pop();
+  if (pr) return {base: pr.tgt, rule: 'pr', pr};
+  const rec = (r.recorded[b] || []).filter(live);
+  if (rec.length === 1) return {base: rec[0], rule: 'recorded'};
+  if (rec.length > 1) return {base: closest(r, b, rec), rule: 'recorded', ambiguous: rec.length};
+  const guess = inferBase(r, b);
+  if (guess) return {base: guess, rule: 'inferred'};
+  return {base: r.def, rule: 'default'};
+}
+function compareMap(r) {
+  const m = dict();
+  Object.keys(r.branches).forEach(b => { m[b] = b === r.def ? {base: null, rule: 'default'} : chooseBase(r, b); });
+  // Guesses and hand-set choices can point at each other; break any loop by falling back to the default branch.
+  Object.keys(m).sort().forEach(b => {
+    const seen = new Set([b]); let x = m[b].base;
+    while (x && !seen.has(x)) { seen.add(x); x = m[x].base; }
+    if (x === b) m[b] = {base: r.def, rule: 'default', loop: true};
+  });
+  return m;
+}
+const whyShort = w => ({manual: 'set by hand', pr: `PR #${w.pr && w.pr.id}`, recorded: w.ambiguous ? 'ambiguous' : 'recorded', inferred: 'guess', default: 'default'})[w.rule];
+function whyLong(w) {
+  if (w.rule === 'manual') return 'Set by hand below.';
+  if (w.rule === 'pr') return `Target of PR #${w.pr.id} (${w.pr.status}).`;
+  if (w.rule === 'recorded') return w.ambiguous
+    ? `Recorded when the branch appeared, but ${w.ambiguous} branches were at that commit, so this is the closest of them.`
+    : 'Recorded when the branch appeared: it was the only branch at that commit.';
+  if (w.rule === 'inferred') return 'Guessed from the commit graph: the long-lived branch, or a branch this one fully contains, that it is fewest commits beyond.';
+  return w.loop ? 'The choices formed a loop, so the default branch.' : 'Nothing better known, so the default branch.';
+}
+const baseOf = (r, b) => CM[b] ? CM[b].base : null;
+function truthMismatch(r, b) {
+  if (b === r.def || !showTruth()) return null;
+  const real = r.createdFrom[b];
+  if (!real || real === baseOf(r, b)) return null;
+  return hasBranch(r, real) ? real : `${real} (deleted)`;
+}
+
+function ownCommits(r, b) {
+  const base = baseOf(r, b);
+  if (!base) return [...reach(r, r.branches[b])].sort(byTime(r));
+  return aheadBehind(r, b, base).ahead;
+}
+function reachableCommits(r) {
+  const all = new Set();
+  Object.values(r.branches).forEach(h => reach(r, h).forEach(x => all.add(x)));
+  return [...all].map(id => r.commits[id]);
+}
+function branchOrder(r) {
+  const out = [];
+  const visit = b => { if (out.includes(b)) return; out.push(b); Object.keys(r.branches).filter(x => baseOf(r, x) === b).sort().forEach(visit); };
+  visit(r.def);
+  Object.keys(r.branches).forEach(b => { if (!out.includes(b)) out.push(b); });
+  return out;
+}
+const openPrFor = (r, b) => r.prs.filter(p => p.src === b && p.status === 'open').slice(-1)[0];
+const branchesContaining = (r, id) => Object.keys(r.branches).filter(b => reach(r, r.branches[b]).has(id));
+const ciColor = ci => ({success:'var(--ok)', failure:'var(--fail)', pending:'var(--warn)', running:'var(--run)'}[ci] || 'var(--line)');
+const short = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+function log(r, text) { r.log.unshift({t: now(), text}); }
+// The merged-state line for a branch: PR record first, then the content check against what it is compared with.
+function mergeNote(r, b) {
+  const m = prMerge(r, b);
+  if (m) return m.extra ? {text: `${m.extra} new since #${m.p.id}`, warn: true} : {text: `merged via #${m.p.id} (${METHOD[m.p.mergeMethod]})`};
+  const base = baseOf(r, b);
+  const how = base && contentMerged(r, b, base);
+  return how ? {text: `content in ${short(base, 12)} (${how})`} : null;
+}
+
+// The rules `git check-ref-format --branch` applies, limited to this demo's character set.
+function branchNameError(r, name) {
+  if (!name) return 'Enter a branch name first.';
+  if (!/^[\w.\-\/]+$/.test(name)) return 'Use letters, numbers, - _ . / only (no spaces).';
+  if (name === 'HEAD' || name.startsWith('-')) return `Git does not allow "${name}" as a branch name.`;
+  if (name.includes('..') || name.includes('//') || name.startsWith('/') || name.endsWith('/') || name.endsWith('.'))
+    return 'Git rejects "..", "//", a leading or trailing "/", and a trailing ".".';
+  if (name.split('/').some(part => part.startsWith('.') || part.endsWith('.lock')))
+    return 'No part of the name may start with "." or end with ".lock".';
+  if (hasBranch(r, name)) return `Branch "${name}" already exists.`;
+  const clash = Object.keys(r.branches).find(b => b.startsWith(name + '/') || name.startsWith(b + '/'));
+  if (clash) return `"${name}" clashes with branch "${clash}": Git cannot have both "x" and "x/…".`;
+  return '';
+}
+
+const node = (k, label) => `data-k="${esc(k)}" tabindex="0" role="button" aria-label="${esc(label)}"`;
+const commitKind = c => c.kind === 'squash' ? `squash of ${c.squashOf.length} commit${c.squashOf.length === 1 ? '' : 's'}` : c.kind === 'rebase' ? `rebased copy of ${c.copyOf}` : c.parents.length > 1 ? 'merge commit' : '';
+
+/* ---------- tree ---------- */
+function renderTree() {
+  const r = R(), rows = branchOrder(r), RH = 78, TOP = 32, BX = 196, BW = 236, CX = BX + BW + 48;
+  const data = rows.map(b => { const list = ownCommits(r, b); const shown = list.slice(-MAX_SHOWN); return {b, shown, more: list.length - shown.length}; });
+  const maxItems = Math.max(1, ...data.map(d => d.shown.length + (d.more ? 1 : 0)));
+  const W = Math.max(760, CX - 10 + maxItems * 64 + 30);
+  const yOf = i => TOP + 26 + i * RH;
+  const H = yOf(rows.length - 1) + 54;
+  const ry = (yOf(0) + yOf(rows.length - 1)) / 2;
+  let g = '';
+
+  rows.forEach((b, i) => {
+    const y = yOf(i);
+    g += `<path d="M150 ${ry} C175 ${ry},170 ${y},${BX} ${y}" fill="none" stroke="var(--line)" stroke-width="1.2"/>`;
+  });
+  const repoSel = sel.type === 'repo';
+  g += `<g ${node('repo:', `Repository ${r.name}, ${rows.length} branches`)}>
+    <rect x="14" y="${ry - 28}" width="136" height="56" rx="10" fill="${repoSel ? 'var(--accent-bg)' : 'var(--panel)'}" stroke="var(--accent)" stroke-width="${repoSel ? 2 : 1.2}"/>
+    <text class="t" x="82" y="${ry - 6}" text-anchor="middle">${esc(short(r.name, 16))}</text>
+    <text class="s" x="82" y="${ry + 13}" text-anchor="middle">${rows.length} branches</text></g>`;
+
+  data.forEach(({b, shown, more}, i) => {
+    const y = yOf(i), isSel = sel.type === 'branch' && sel.id === b, pr = openPrFor(r, b), base = baseOf(r, b);
+    let sub;
+    if (!base) sub = 'default branch';
+    else { const x = aheadBehind(r, b, base); sub = `↑${x.ahead.length} ↓${x.behind.length} vs ${short(base, 14)} · ${whyShort(CM[b])}`; }
+    const real = truthMismatch(r, b), note = mergeNote(r, b);
+    const third = real ? {text: `really from ${short(real, 22)}`, warn: true} : note;
+    const label = `Branch ${b}, ${sub.replace('↑', 'ahead ').replace('↓', 'behind ')}${third ? `, ${third.text}` : ''}${pr ? `, PR #${pr.id} CI ${pr.ci}` : ''}`;
+    g += `<g ${node('branch:' + b, label)}>
+      <rect x="${BX}" y="${y - 29}" width="${BW}" height="58" rx="8" fill="${isSel ? 'var(--accent-bg)' : 'var(--panel)'}" stroke="${real ? 'var(--warn)' : isSel ? 'var(--accent)' : 'var(--border)'}" stroke-width="${isSel || real ? 2 : 1}" ${real ? 'stroke-dasharray="5 3"' : ''}/>
+      <text class="t" x="${BX + 14}" y="${y - 11}">${esc(short(b, 26))}</text>
+      <text class="s" x="${BX + 14}" y="${y + 5}">${esc(sub)}</text>
+      ${third ? `<text class="${third.warn ? 'w' : 'o'}" x="${BX + 14}" y="${y + 20}">${esc(third.text)}</text>` : ''}
+      ${pr ? `<circle class="ci" cx="${BX + BW - 14}" cy="${y - 15}" r="5" fill="${ciColor(pr.ci)}"><title>PR #${pr.id} CI: ${pr.ci}</title></circle>` : ''}</g>`;
+
+    let x = CX;
+    const items = [];
+    if (more) items.push({more});
+    shown.forEach(id => items.push({id}));
+    if (items.length) g += `<line x1="${BX + BW}" y1="${y}" x2="${x - 14}" y2="${y}" stroke="var(--line)" stroke-width="1.2"/>`;
+    items.forEach((it, k) => {
+      if (k > 0) g += `<line x1="${x - 64 + 13}" y1="${y}" x2="${x - 13}" y2="${y}" stroke="var(--line)" stroke-width="1.2"/>`;
+      if (it.more) {
+        g += `<g ${node('branch:' + b, `${it.more} older commits on ${b}`)}><rect x="${x - 18}" y="${y - 11}" width="36" height="22" rx="11" fill="var(--chip)" stroke="var(--border)"/><text class="s" x="${x}" y="${y + 4}" text-anchor="middle">+${it.more}</text></g>`;
+      } else {
+        const c = r.commits[it.id], isMerge = c.parents.length > 1, isHead = r.branches[b] === it.id;
+        const cs = sel.type === 'commit' && sel.id === it.id, kind = commitKind(c);
+        const sw = cs ? 3.5 : 2;
+        const shape = c.kind === 'squash'
+          ? `<rect x="${x - 10}" y="${y - 10}" width="20" height="20" rx="4" fill="var(--panel)" stroke="var(--accent)" stroke-width="${sw}"/>`
+          : `<circle cx="${x}" cy="${y}" r="10" fill="${isMerge ? 'var(--accent)' : 'var(--panel)'}" stroke="var(--accent)" stroke-width="${sw}" ${c.kind === 'rebase' ? 'stroke-dasharray="3 2"' : ''}/>`;
+        g += `<g ${node('commit:' + it.id, `Commit ${it.id}: ${c.msg} by ${c.author}${kind ? `, ${kind}` : ''}${isHead ? `, head of ${b}` : ''}`)} class="${fresh.has(it.id) ? 'pop' : ''}">
+          ${isHead ? `<circle cx="${x}" cy="${y}" r="15" fill="none" stroke="var(--accent)" stroke-width="1"/>` : ''}
+          ${shape}
+          <text class="m" x="${x}" y="${y + 30}" text-anchor="middle">${it.id}</text>
+          <title>${esc(c.msg)} (${esc(c.author)})${kind ? ` · ${esc(kind)}` : ''}</title></g>`;
+      }
+      x += 64;
+    });
+  });
+
+  const svg = $('#tree');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.innerHTML = g;
+  fresh.clear();
+}
+
+/* ---------- PR table ---------- */
+function renderPRs() {
+  const r = R();
+  if (!r.prs.length) { $('#prs').innerHTML = '<tr><td class="muted">No pull requests yet. Select a branch and open one.</td></tr>'; return; }
+  let h = '<tr><th>#</th><th>Title</th><th>Branches</th><th>Opened by</th><th>Ahead</th><th>CI</th><th>Status</th><th></th></tr>';
+  [...r.prs].reverse().forEach(p => {
+    const live = hasBranch(r, p.src) && hasBranch(r, p.tgt);
+    const ahead = live ? aheadBehind(r, p.src, p.tgt).ahead.length : 0;
+    const open = p.status === 'open';
+    const canMerge = open && live && p.ci === 'success' && ahead > 0;
+    const why = !open ? '' : !live ? 'Branch deleted' : p.ci !== 'success' ? 'CI must pass first' : ahead === 0 ? 'Nothing to merge' : 'Merge';
+    const method = p.method || 'merge';
+    h += `<tr>
+      <td>#${p.id}</td>
+      <td>${esc(p.title)}</td>
+      <td><code>${esc(p.src)}</code> → <code>${esc(p.tgt)}</code></td>
+      <td>${esc(p.author)}${p.mergedBy ? `<div class="muted" style="font-size:12px">merged by ${esc(p.mergedBy)} · ${METHOD[p.mergeMethod]}</div>` : ''}</td>
+      <td class="ab">${open ? ahead : '–'}</td>
+      <td><span class="badge b-${p.ci}">${p.ci === 'running' ? 'running…' : p.ci}</span></td>
+      <td><span class="badge b-${p.status}">${p.status}</span></td>
+      <td style="white-space:nowrap">${open ? `
+        <button class="mini" data-act="ci" data-id="${p.id}" ${p.ci === 'running' ? 'disabled' : ''}>Run CI</button>
+        <select class="mini" data-method="${p.id}" aria-label="Merge method for PR #${p.id}">${Object.keys(METHOD).map(m => `<option value="${m}" ${m === method ? 'selected' : ''}>${METHOD[m]}</option>`).join('')}</select>
+        <button class="mini primary" data-act="merge" data-id="${p.id}" ${canMerge ? '' : 'disabled'} title="${why}">Merge</button>
+        <button class="mini" data-act="close" data-id="${p.id}">Close</button>` : ''}</td></tr>`;
+  });
+  $('#prs').innerHTML = h;
+}
+
+/* ---------- ahead/behind matrix ---------- */
+function renderMatrix() {
+  const r = R(), bs = branchOrder(r);
+  let h = '<tr><th></th>' + bs.map(b => `<th title="${esc(b)}"><code>${esc(short(b, 14))}</code></th>`).join('') + '</tr>';
+  bs.forEach(a => {
+    h += `<tr><th title="${esc(a)}"><code>${esc(short(a, 18))}</code></th>`;
+    bs.forEach(b => {
+      if (a === b) { h += '<td class="muted">–</td>'; return; }
+      const x = aheadBehind(r, a, b), how = x.ahead.length ? contentMerged(r, a, b) : null;
+      const txt = x.ahead.length === 0 && x.behind.length === 0 ? '<span class="muted">even</span>' : `↑${x.ahead.length} ↓${x.behind.length}`;
+      h += `<td class="ab">${txt}${how ? `<span class="tag" title="The ${x.ahead.length} ahead commit(s) are already in ${esc(b)} by content (${how})">✓</span>` : ''}</td>`;
+    });
+    h += '</tr>';
+  });
+  $('#matrix').innerHTML = h;
+}
+
+/* ---------- details + actions ---------- */
+function renderDetails() {
+  const r = R(); let h = '';
+  if (sel.type === 'repo') {
+    const live = reachableCommits(r);
+    const authors = [...new Set(live.map(c => c.author))];
+    const others = Object.keys(r.branches).filter(b => b !== r.def);
+    const right = others.filter(b => r.createdFrom[b] === baseOf(r, b)).length;
+    h = `<h2>Repository · ${esc(r.name)}</h2><dl class="kv">
+      <dt>Default</dt><dd><code>${esc(r.def)}</code></dd>
+      <dt>Branches</dt><dd>${Object.keys(r.branches).length}</dd>
+      <dt>Commits</dt><dd>${live.length}</dd>
+      <dt>Open PRs</dt><dd>${r.prs.filter(p => p.status === 'open').length}</dd>
+      <dt>Merged PRs</dt><dd>${r.prs.filter(p => p.status === 'merged').length}</dd>
+      <dt>Contributors</dt><dd>${authors.map(esc).join(', ')}</dd>
+      ${showTruth() ? `<dt>Right parent</dt><dd>${right} of ${others.length} branches compare with the branch they were really created from</dd>` : ''}</dl>
+      <p class="muted" style="font-size:13px;margin:12px 0 0">Click a branch in the tree (or Tab to it and press Enter) to commit, branch off or open a pull request.</p>`;
+  } else if (sel.type === 'commit') {
+    const c = r.commits[sel.id];
+    const link = id => `<code ${node('commit:' + id, `Commit ${id}`)} style="cursor:pointer">${id}</code>`;
+    const type = c.kind === 'squash' ? `Squash commit of ${c.squashOf.map(link).join(' ')}`
+      : c.kind === 'rebase' ? `Rebased copy of ${link(c.copyOf)} (same patch id)`
+      : c.parents.length > 1 ? 'Merge commit' : c.parents.length ? 'Normal commit' : 'Root commit';
+    h = `<h2>Commit <code>${c.id}</code></h2><dl class="kv">
+      <dt>Message</dt><dd>${esc(c.msg)}</dd>
+      <dt>Author</dt><dd>${esc(c.author)}</dd>
+      <dt>Type</dt><dd>${type}</dd>
+      <dt>Patch id</dt><dd>${c.patch ? `<code>${c.patch}</code>` : '– (merge commits have none)'}</dd>
+      <dt>Parents</dt><dd>${c.parents.map(link).join(' ') || '–'}</dd>
+      <dt>On branches</dt><dd>${branchesContaining(r, c.id).map(b => `<code>${esc(b)}</code>`).join(' ') || '–'}</dd></dl>`;
+  } else {
+    const b = sel.id, head = r.commits[r.branches[b]], w = CM[b], base = w.base, pr = openPrFor(r, b);
+    const vsBase = base ? aheadBehind(r, b, base) : null;
+    const vsDef = base && base !== r.def ? aheadBehind(r, b, r.def) : null;
+    const targets = Object.keys(r.branches).filter(x => x !== b);
+    const m = prMerge(r, b), how = base && contentMerged(r, b, base);
+    const merged = m
+      ? (m.extra ? `Was merged via PR #${m.p.id} (${METHOD[m.p.mergeMethod]}); ${m.extra} new commit${m.extra === 1 ? '' : 's'} since.` : `Yes, via PR #${m.p.id} (${METHOD[m.p.mergeMethod]}).`)
+        + (m.p.mergeMethod !== 'merge' && hasBranch(r, m.p.tgt) && aheadBehind(r, b, m.p.tgt).ahead.length ? `<span class="why">Git still counts it ahead of ${esc(m.p.tgt)}: ${METHOD[m.p.mergeMethod]} puts new commits there.</span>` : '')
+      : how ? `Its changes are already in <code>${esc(base)}</code> (${how}), with no PR on record.` : 'No';
+    const real = r.createdFrom[b];
+    h = `<h2>Branch <code>${esc(b)}</code></h2><dl class="kv">
+      <dt>Head</dt><dd><code>${head.id}</code> ${esc(head.msg)}</dd>
+      <dt>Compared with</dt><dd>${base ? `<code>${esc(base)}</code>` : '– (this is the default branch)'}${base ? `<span class="why">${whyLong(w)}</span>` : ''}</dd>
+      ${showTruth() && b !== r.def ? `<dt>Really from</dt><dd>${real ? `<code>${esc(real)}</code>${hasBranch(r, real) ? '' : ' (deleted)'}` : '–'} ${real === base ? '<span class="tag">matches</span>' : '<span class="tag warn">guess is wrong</span>'}<span class="why">Only this demo knows; Git does not record it.</span></dd>` : ''}
+      ${vsBase ? `<dt>vs ${esc(short(base, 12))}</dt><dd class="ab">↑${vsBase.ahead.length} ahead, ↓${vsBase.behind.length} behind</dd>` : ''}
+      ${vsDef ? `<dt>vs ${esc(r.def)}</dt><dd class="ab">↑${vsDef.ahead.length} ahead, ↓${vsDef.behind.length} behind</dd>` : ''}
+      ${b !== r.def ? `<dt>Merged?</dt><dd>${merged}</dd>` : ''}
+      <dt>Open PR</dt><dd>${pr ? `#${pr.id} → <code>${esc(pr.tgt)}</code> by ${esc(pr.author)} <span class="badge b-${pr.ci}">CI ${pr.ci}</span>` : 'none'}</dd></dl>
+
+      ${b !== r.def ? `<div class="form"><h3>Compare with</h3>
+        <select id="fBase" aria-label="Compare ${esc(b)} with">
+          <option value="">Automatic (PR target, record or guess)</option>
+          ${targets.map(t => `<option value="${esc(t)}" ${r.override[b] === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+        </select></div>` : ''}
+
+      <div class="form"><h3>Commit to ${esc(b)}</h3>
+        <div class="row"><input type="text" id="fMsg" placeholder="Commit message" aria-label="Commit message"><button class="primary" data-act="commit">Commit</button></div></div>
+
+      <div class="form"><h3>New branch from ${esc(b)}</h3>
+        <div class="row"><input type="text" id="fBranch" placeholder="e.g. feature/search" aria-label="New branch name"><button data-act="branch">Create</button></div></div>
+
+      <div class="form"><h3>Open pull request</h3>
+        ${targets.length ? `<div class="row"><input type="text" id="fTitle" placeholder="PR title" aria-label="PR title">
+          <select id="fTgt" aria-label="Target branch">${targets.map(t => `<option ${t === (base || r.def) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
+        <button data-act="openpr">Open PR from ${esc(short(b, 18))}</button>` : '<span class="muted">Create another branch first.</span>'}</div>
+
+      ${b !== r.def ? `<div class="form"><button data-act="delete">Delete branch</button></div>` : ''}
+      <div class="err" id="fErr" role="alert"></div>`;
+  }
+  $('#details').innerHTML = h;
+}
+
+function renderCompare() {
+  const r = R(), bs = branchOrder(r);
+  if (!hasBranch(r, cmp.a)) cmp.a = bs[1] || bs[0];
+  if (!hasBranch(r, cmp.b)) cmp.b = r.def;
+  const opts = v => bs.map(b => `<option ${b === v ? 'selected' : ''}>${esc(b)}</option>`).join('');
+  $('#cmpA').innerHTML = opts(cmp.a); $('#cmpB').innerHTML = opts(cmp.b);
+  if (cmp.a === cmp.b) { $('#cmpOut').innerHTML = '<span class="muted">Pick two different branches.</span>'; return; }
+  const x = aheadBehind(r, cmp.a, cmp.b), eq = equivalence(r, cmp.a, cmp.b);
+  const tagFor = e => e.kind === 'patch' ? `<span class="tag" title="Same patch id: rebased or cherry-picked">same patch as ${e.twin}</span>`
+    : e.kind === 'content' ? `<span class="tag" title="Its change is inside a squash commit">in squash ${e.holder || ''}</span>`
+    : e.kind === 'merge' ? '<span class="muted" style="font-size:12px">merge commit</span>' : '';
+  const tags = new Map(eq.map(e => [e.id, tagFor(e)]));
+  const list = ids => ids.length ? '<ul style="margin:4px 0 10px;padding-left:18px;font-size:13px">' + ids.map(id => `<li><code>${id}</code> ${esc(r.commits[id].msg)} ${tags.get(id) || ''}</li>`).join('') + '</ul>' : '<p class="muted" style="margin:4px 0 10px;font-size:13px">none</p>';
+  const done = eq.filter(e => e.kind !== 'new').length;
+  const summary = !eq.length ? '' : done === eq.length
+    ? `<p class="note" style="margin:0 0 8px">Content check: everything only on ${esc(cmp.a)} is already in ${esc(cmp.b)}, so it was ${contentMerged(r, cmp.a, cmp.b)} in.</p>`
+    : done ? `<p class="note" style="margin:0 0 8px">Content check: ${done} of ${eq.length} are already in ${esc(cmp.b)}.</p>` : '';
+  $('#cmpOut').innerHTML = `<p style="margin:0 0 8px"><code>${esc(cmp.a)}</code> is <b>${x.ahead.length} ahead</b> and <b>${x.behind.length} behind</b> <code>${esc(cmp.b)}</code>.</p>
+    ${summary}
+    <div class="muted" style="font-size:13px">Only on ${esc(cmp.a)}:</div>${list(x.ahead)}
+    <div class="muted" style="font-size:13px">Only on ${esc(cmp.b)}:</div>${list(x.behind)}`;
+}
+
+function renderLog() { $('#log').innerHTML = R().log.map(e => `<li><time>${e.t}</time><span>${esc(e.text)}</span></li>`).join(''); }
+
+/* Re-rendering replaces the HTML, so carry half-typed form input and keyboard focus across it. */
+const FIELDS = ['fMsg', 'fBranch', 'fTitle', 'fTgt'];
+const selKey = () => `${cur}|${sel.type}|${sel.id ?? ''}`;
+function captureUI() {
+  const values = {};
+  FIELDS.forEach(id => { const el = document.getElementById(id); if (el) values[id] = el.value; });
+  const a = document.activeElement;
+  const focus = a && a !== document.body && a.closest ? {
+    id: a.id, box: a.closest('[id]')?.id, k: a.dataset?.k, act: a.dataset?.act, pid: a.dataset?.id, method: a.dataset?.method,
+    start: a.selectionStart, end: a.selectionEnd
+  } : null;
+  return {key: selKey(), values, focus};
+}
+function restoreUI(ui) {
+  if (ui.key === selKey()) FIELDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el || !(id in ui.values)) return;
+    if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === ui.values[id])) return;
+    el.value = ui.values[id];
+  });
+  const f = ui.focus;
+  if (!f) return;
+  let el = null;
+  if (f.id) el = document.getElementById(f.id);
+  else if (f.box && (f.k || f.act || f.method)) {
+    const box = document.getElementById(f.box);
+    el = box && [...box.querySelectorAll('[data-k],[data-act],[data-method]')].find(e =>
+      f.k ? e.dataset.k === f.k : f.method ? e.dataset.method === f.method : e.dataset.act === f.act && e.dataset.id === f.pid);
+  }
+  if (!el || el === document.activeElement) return;
+  el.focus({preventScroll: true});
+  if (f.start != null && el.setSelectionRange) el.setSelectionRange(f.start, f.end);
+}
+
+function render() {
+  const ui = captureUI();
+  CM = compareMap(R());
+  renderTree(); renderPRs(); renderMatrix(); renderDetails(); renderCompare(); renderLog();
+  restoreUI(ui);
+}
+
+/* ---------- actions ---------- */
+function err(msg) { const e = $('#fErr'); if (e) e.textContent = msg; }
+
+// Any run in flight is cancelled: its result belongs to an older head commit.
+function invalidateCI(r, branch, why) {
+  r.prs.filter(p => p.src === branch && p.status === 'open').forEach(p => {
+    if (p.ci !== 'pending') log(r, `PR #${p.id} CI ${p.ci} → pending (${why})`);
+    p.ci = 'pending'; p.ciRun = null;
+  });
+}
+function endPR(p, status) {
+  if (p.ci === 'running') p.ci = 'cancelled';
+  p.ciRun = null; p.status = status;
+}
+const ciPasses = () => ({pass: true, fail: false}[$('#ciMode').value] ?? rand() < 0.75);
+
+const actions = {
+  commit() {
+    const r = R(), b = sel.id, msg = $('#fMsg').value.trim();
+    if (!msg) return err('Enter a commit message first.');
+    const before = r.branches[b];
+    const id = mk(r, [before], msg, actor());
+    r.branches[b] = id; fresh.add(id);
+    log(r, `${actor()} committed "${msg}" to ${b}: ${b} ${before} → ${id}`);
+    invalidateCI(r, b, 'new commit');
+    $('#fMsg').value = '';
+    render();
+  },
+  branch() {
+    const r = R(), name = $('#fBranch').value.trim();
+    const problem = branchNameError(r, name);
+    if (problem) return err(problem);
+    const sha = r.branches[sel.id];
+    // What a push webhook could record: every branch whose head is the new branch's commit.
+    const atSha = Object.keys(r.branches).filter(x => r.branches[x] === sha);
+    r.branches[name] = sha; r.createdFrom[name] = sel.id; r.recorded[name] = atSha;
+    log(r, `${actor()} created branch ${name} from ${sel.id} at ${sha}` +
+      (atSha.length > 1 ? ` (the webhook saw ${atSha.join(', ')} at that commit, so the parent is ambiguous)` : ` (recorded: ${atSha[0]})`));
+    sel = {type: 'branch', id: name}; render();
+  },
+  openpr() {
+    const r = R(), src = sel.id, tgt = $('#fTgt').value, title = $('#fTitle').value.trim();
+    if (!title) return err('Enter a PR title first.');
+    if (!hasBranch(r, tgt)) return err(`Branch "${tgt}" no longer exists.`);
+    if (r.prs.some(p => p.status === 'open' && p.src === src && p.tgt === tgt)) return err(`A PR from ${src} to ${tgt} is already open.`);
+    if (aheadBehind(r, src, tgt).ahead.length === 0) return err(`Nothing to merge: ${src} has no commits that ${tgt} lacks.`);
+    const p = {id: r.prSeq++, title, author: actor(), src, tgt, status: 'open', ci: 'pending'};
+    r.prs.push(p);
+    log(r, `${actor()} opened PR #${p.id} "${title}": ${src} → ${tgt}`);
+    $('#fTitle').value = '';
+    render();
+  },
+  delete() {
+    const r = R(), b = sel.id;
+    const affected = r.prs.filter(p => p.status === 'open' && (p.src === b || p.tgt === b));
+    const children = Object.keys(r.branches).filter(x => x !== b && baseOf(r, x) === b);
+    const prList = affected.map(p => '#' + p.id).join(', ');
+    if (!window.confirm(`Delete branch ${b}?${affected.length ? ` This closes PR ${prList}.` : ''} Only "Reset demo" can bring it back.`)) return;
+    delete r.branches[b]; delete r.recorded[b]; delete r.override[b];
+    Object.keys(r.override).forEach(x => { if (r.override[x] === b) delete r.override[x]; });
+    affected.forEach(p => endPR(p, 'closed'));
+    // The rules pick a new branch to compare with for anything that used the deleted one.
+    const after = compareMap(r);
+    log(r, `${actor()} deleted branch ${b}` + (affected.length ? `; closed PR ${prList}` : '') +
+      (children.length ? `; now compared with: ${children.map(x => `${x} → ${after[x].base}`).join(', ')}` : ''));
+    sel = {type: 'repo'}; render();
+  },
+  ci(id) {
+    const r = R(), p = r.prs.find(x => x.id === id);
+    const run = ++runSeq, sha = r.branches[p.src];
+    p.ci = 'running'; p.ciRun = run;
+    log(r, `CI started for PR #${p.id} (${p.src} at ${sha})`); render();
+    setTimeout(() => {
+      // Ignore the result if the demo was reset, or the run was cancelled by a new commit, close or delete.
+      if (repos[r.name] !== r || p.ciRun !== run || r.branches[p.src] !== sha) return;
+      p.ciRun = null;
+      p.ci = ciPasses() ? 'success' : 'failure';
+      log(r, `CI ${p.ci === 'success' ? 'passed' : 'failed'} for PR #${p.id} at ${sha}: running → ${p.ci}`);
+      if (R() === r) render();
+    }, CI_MS);
+  },
+  merge(id) {
+    const r = R(), p = r.prs.find(x => x.id === id), method = p.method || 'merge';
+    const before = r.branches[p.tgt], head = r.branches[p.src];
+    const ahead = aheadBehind(r, p.src, p.tgt).ahead, work = ahead.filter(c => r.commits[c].patch);
+    let after = before, detail;
+    if (method === 'merge') {
+      after = mk(r, [before, head], `Merge pull request #${p.id} from ${p.src}`, actor());
+      fresh.add(after);
+      detail = `${ahead.length} commit${ahead.length === 1 ? '' : 's'}`;
+    } else if (method === 'squash') {
+      // One new commit holding the branch's changes that the target does not have yet.
+      const has = contentOf(r, before), changes = [...new Set(work.flatMap(c => r.commits[c].changes))].filter(ch => !has.has(ch));
+      after = mk(r, [before], `${p.title} (#${p.id})`, p.author, {kind: 'squash', squashOf: work, changes});
+      fresh.add(after);
+      detail = `${work.length} commit${work.length === 1 ? '' : 's'} squashed into ${after}`;
+    } else {
+      // Replay each commit as a new copy with the same patch id; like `git rebase`, skip patches the target already has.
+      const inTgt = new Set([...reach(r, before)].map(x => r.commits[x].patch).filter(Boolean));
+      const todo = work.filter(c => !inTgt.has(r.commits[c].patch));
+      todo.forEach(c => {
+        const o = r.commits[c];
+        after = mk(r, [after], o.msg, o.author, {kind: 'rebase', copyOf: c, patch: o.patch, changes: o.changes});
+        fresh.add(after);
+      });
+      detail = `${todo.length} commit${todo.length === 1 ? '' : 's'} copied` + (work.length > todo.length ? `, ${work.length - todo.length} already there` : '');
+    }
+    r.branches[p.tgt] = after;
+    endPR(p, 'merged');
+    Object.assign(p, {mergedBy: actor(), mergeMethod: method, mergedHead: head, mergeCommit: after});
+    log(r, `${actor()} merged PR #${p.id} by ${METHOD[method]} (${detail}) ${p.src} → ${p.tgt}: ${p.tgt} ${before} → ${after}`);
+    invalidateCI(r, p.tgt, `${p.tgt} moved`);
+    render();
+  },
+  close(id) {
+    const r = R(), p = r.prs.find(x => x.id === id);
+    endPR(p, 'closed'); log(r, `${actor()} closed PR #${p.id}`); render();
+  }
+};
+
+/* ---------- events ---------- */
+function select(k) {
+  const [type, ...rest] = k.dataset.k.split(':'); const id = rest.join(':');
+  sel = type === 'repo' ? {type} : {type, id};
+  if (type === 'branch') cmp.a = id;
+  render();
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-act]');
+  if (a && !a.disabled) { actions[a.dataset.act](a.dataset.id ? Number(a.dataset.id) : undefined); return; }
+  const k = e.target.closest('[data-k]');
+  if (k) select(k);
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset && t.dataset.method) { const p = R().prs.find(x => x.id === Number(t.dataset.method)); if (p) p.method = t.value; return; }
+  if (t.id === 'fBase') {
+    const r = R(), b = sel.id;
+    if (t.value) r.override[b] = t.value; else delete r.override[b];
+    log(r, `${actor()} set ${b} to compare with ${t.value || 'automatic'}`);
+    render();
+  }
+});
+document.addEventListener('input', e => { if (['fMsg', 'fBranch', 'fTitle'].includes(e.target.id)) err(''); });
+document.addEventListener('keydown', e => {
+  const k = e.target.closest && e.target.closest('[data-k]');
+  if (k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(k); return; }
+  if (e.key !== 'Enter') return;
+  const map = {fMsg: 'commit', fBranch: 'branch', fTitle: 'openpr'};
+  if (map[e.target.id]) actions[map[e.target.id]]();
+});
+$('#repoSel').addEventListener('change', e => { cur = e.target.value; sel = {type: 'repo'}; cmp = {a: null, b: null}; render(); });
+$('#cmpA').addEventListener('change', e => { cmp.a = e.target.value; renderCompare(); });
+$('#cmpB').addEventListener('change', e => { cmp.b = e.target.value; renderCompare(); });
+$('#truth').addEventListener('change', render);
+$('#reset').addEventListener('click', init);
+
+function init() {
+  rand = mulberry32(SEED); T = 0;
+  repos = {'web-app': seedWeb(), 'api-server': seedApi()};
+  cur = 'web-app'; sel = {type: 'repo'}; cmp = {a: null, b: null};
+  $('#repoSel').innerHTML = Object.keys(repos).map(n => `<option>${esc(n)}</option>`).join('');
+  render();
+}
+$('#actor').innerHTML = USERS.map(u => `<option>${u}</option>`).join('');
+init();
+})();
+</script>
+</body>
+</html>

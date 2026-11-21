@@ -20,9 +20,10 @@
    (`at` optional ISO), `GetTreeResponse`, `SyncTreeResponse`, `SetCompareWithBody`, `SetCompareWithResponse`,
    `CompareQuery`, `CompareResponse`. Cap arrays (`branches` ≤ 2000, `commits` ≤ 20 000, names ≤ 255).
    Export from `@app/shared` and `@app/shared/client` (no `node:` imports in this file).
-5. **Seed**: on the seed repo add a `RepoGraph` (`ready`) with a small snapshot: `main`, `feat-a` (open PR,
-   ahead 2), `feat-b` stacked on `feat-a`, `old-fix` merged via PR (squash), `same-as-main` (same commit).
-   F uses this before the sync job exists.
+5. **Seed**: on the seed repo add a `RepoGraph` (`ready`) whose snapshot mirrors the prototype's `web-app`
+   demo (`seedWeb()` in `docs/branch-tree/prototype.html`): `main`, `dev`, `chore/readme` (merged via #1,
+   squash), `feature/login` (open PR → `dev`), `feature/login-oauth` (inferred → `feature/login`),
+   `hotfix/header` (open PR, CI failure). Use made-up 40-char SHAs. F uses this before the sync job exists.
 6. **Env**: `REPO_CACHE_DIR=./.cache/repos` in `.env.example` (comment: commits-only clones, see T-spec).
    Add it to `apps/web/src/server/env.ts` as optional with that default. Add `.cache/` to `.gitignore`.
 7. **CLAUDE.md**: ownership row `packages/git-graph/` → **T — Branch tree engine**. Under "Security
