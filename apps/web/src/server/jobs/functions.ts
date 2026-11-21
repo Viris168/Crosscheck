@@ -3,15 +3,18 @@ import { LIMITS, REVIEW_SWEEP_CRON } from '@app/shared';
 import { pruneRemovedMembers, syncUserMemberships } from '@/server/github';
 import { logger } from '@/server/logger';
 import { inngest } from './client';
-import { realDeps, type JobDeps, type StepTools } from './deps';
+import { realDeps, realTreeSyncDeps, type JobDeps, type StepTools } from './deps';
 import { MEMBER_PRUNE_CRON, memberPruneHandler } from './member-prune';
 import { memberSyncHandler } from './member-sync';
 import { reviewFinalizeHandler } from './review-finalize';
 import { reviewStartHandler } from './review-start';
 import { reviewSweepHandler } from './review-sweep';
+import { treeSyncHandler, type TreeSyncDeps, type TreeSyncStep } from './tree-sync';
 
 let deps: JobDeps | undefined;
 const getDeps = (): JobDeps => (deps ??= realDeps());
+let treeDeps: TreeSyncDeps | undefined;
+const getTreeDeps = (): TreeSyncDeps => (treeDeps ??= realTreeSyncDeps());
 
 // Inngest's `step.run` returns `Jsonify<T>`; our step outputs are plain JSON, so `StepTools` matches.
 const tools = (step: unknown): StepTools => step as StepTools;
@@ -71,4 +74,23 @@ export const memberPrune = inngest.createFunction(
   { cron: MEMBER_PRUNE_CRON },
   ({ step }) =>
     memberPruneHandler({ step: tools(step) }, { prune: pruneRemovedMembers, log: logger }),
+);
+
+/**
+ * Branch tree: refresh refs, PRs, CI and the commits-only clone, then write the snapshot.
+ * One sync per repo at a time (the clone is also guarded by a Redis lock) and at most 2 per org.
+ * VERIFY: inngest v3 accepts an array of two concurrency limits and applies both.
+ */
+export const treeSync = inngest.createFunction(
+  {
+    id: 'tree-sync',
+    retries: 2,
+    concurrency: [
+      { key: 'event.data.repoId', limit: 1 },
+      { key: 'event.data.orgId', limit: 2 },
+    ],
+  },
+  { event: 'tree/sync-requested' },
+  ({ event, step }) =>
+    treeSyncHandler({ event, step: step as unknown as TreeSyncStep }, getTreeDeps()),
 );

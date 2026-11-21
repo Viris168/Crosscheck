@@ -92,6 +92,9 @@ importers:
       '@app/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@app/git-graph':
+        specifier: workspace:*
+        version: link:../../packages/git-graph
       '@app/github':
         specifier: workspace:*
         version: link:../../packages/github
