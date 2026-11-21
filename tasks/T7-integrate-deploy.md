@@ -22,4 +22,4 @@ wiring only, file anything bigger as a task) · **Needs merged:** T0–T6b
 - Every milestone's "Done when" from the T-spec, re-run on the deployed instance with a real private repo.
 - `assertNoContents` on every clone in the volume.
 - No `/compare/` calls to GitHub in the logs over one hour of use.
-- Membership: a non-collaborator gets 404 on the page and every tree API route.
+- Access: a non-collaborator gets a 404 page on `/repos/:id/tree` (`loadRepoForPage`) and 403 from every tree API route (`requireRepoAccess`, same as the other repo routes since Task H).
