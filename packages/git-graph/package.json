@@ -13,6 +13,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@app/shared": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "catalog:",
     "eslint": "catalog:",
