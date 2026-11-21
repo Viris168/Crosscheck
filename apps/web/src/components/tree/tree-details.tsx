@@ -5,7 +5,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { CompareWithSelect } from './compare-with-select';
 import { branchesContaining, mergedLong, shortSha, whyLong, type TreeGraph } from './layout';
-import type { Selection } from './tree-svg';
+import { RECORDED_TIP, type Selection } from './tree-svg';
 
 const CI_TONE: Record<BranchNode['ci'], string> = {
   success: 'bg-(--t-ok-bg) text-(--t-ok)',
@@ -130,6 +130,14 @@ export function TreeDetails({
         b.compareWith ? (
           <>
             <Code>{b.compareWith}</Code>
+            {b.recorded && (
+              <span
+                title={RECORDED_TIP}
+                className="ml-1.5 inline-block rounded-full bg-[var(--t-accent-bg)] px-2 py-0.5 text-xs font-medium text-[var(--t-accent)]"
+              >
+                recorded
+              </span>
+            )}
             <span className="block text-xs text-muted-foreground">{whyLong(b, canEdit)}</span>
           </>
         ) : (

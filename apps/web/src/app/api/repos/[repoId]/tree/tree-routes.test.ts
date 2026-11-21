@@ -19,6 +19,7 @@ const db = vi.hoisted(() => ({
   branch: { findMany: vi.fn() },
   pullRequest: { findMany: vi.fn() },
   compareOverride: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
+  gitEvent: { findFirst: vi.fn() },
 }));
 vi.mock('@app/db', () => ({ prisma: db }));
 
@@ -144,6 +145,7 @@ beforeEach(() => {
   );
   db.user.findUnique.mockResolvedValue({ login: 'octo' });
   db.repoGraph.findUnique.mockResolvedValue(graph);
+  db.gitEvent.findFirst.mockResolvedValue({ id: 'ev1' });
   perm.getRepoCollaborator.mockResolvedValue(true);
   perm.getRepoPermission.mockResolvedValue('read');
   send.mockResolvedValue({ ids: ['e1'] });
@@ -235,6 +237,83 @@ describe('GET /api/repos/:repoId/tree', () => {
 });
 
 // ---------------------------------------------------------------- POST /tree/sync
+
+describe('GET /tree conditional requests (T5c)', () => {
+  const getIf = (etag: string | null) =>
+    GET(
+      req('/api/repos/r1/tree', etag ? { headers: { 'if-none-match': etag } } : undefined),
+      ctx(),
+    );
+
+  it('sends a weak ETag and no-cache', async () => {
+    const res = await getIf(null);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('etag')).toMatch(/^W\/"[\w-]+"$/);
+    expect(res.headers.get('cache-control')).toBe('private, no-cache');
+  });
+
+  it('answers 304 with no body when the tree has not changed', async () => {
+    const etag = (await getIf(null)).headers.get('etag')!;
+    const res = await getIf(etag);
+    expect(res.status).toBe(304);
+    expect(await res.text()).toBe('');
+    expect(res.headers.get('etag')).toBe(etag);
+    // also matches inside a list and without the weak prefix
+    expect((await getIf(`"nope", ${etag.slice(2)}`)).status).toBe(304);
+  });
+
+  it('a new sync (syncedAt) answers 200 with a new ETag', async () => {
+    const etag = (await getIf(null)).headers.get('etag')!;
+    db.repoGraph.findUnique.mockResolvedValue({
+      ...graph,
+      syncedAt: new Date('2026-11-20T10:00:05Z'),
+    });
+    const res = await getIf(etag);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('etag')).not.toBe(etag);
+    GetTreeResponse.parse(await res.json());
+  });
+
+  it('a status change without a new syncedAt (updatedAt) answers 200', async () => {
+    const etag = (await getIf(null)).headers.get('etag')!;
+    db.repoGraph.findUnique.mockResolvedValue({
+      ...graph,
+      status: 'syncing',
+      updatedAt: new Date(graph.updatedAt.getTime() + 1000),
+    });
+    const res = await getIf(etag);
+    expect(res.status).toBe(200);
+    expect(GetTreeResponse.parse(await res.json()).status).toBe('syncing');
+  });
+
+  it('an override set since (applied at read time) answers 200', async () => {
+    const etag = (await getIf(null)).headers.get('etag')!;
+    overrides.set('feature/login-oauth', 'dev');
+    expect((await getIf(etag)).status).toBe(200);
+  });
+
+  it('a different edit right answers 200', async () => {
+    const etag = (await getIf(null)).headers.get('etag')!;
+    perm.getRepoPermission.mockResolvedValue('write');
+    expect((await getIf(etag)).status).toBe(200);
+  });
+
+  it('access is checked before any 304', async () => {
+    const etag = (await getIf(null)).headers.get('etag')!;
+    perm.getRepoCollaborator.mockResolvedValue(false);
+    expect((await getIf(etag)).status).toBe(403);
+  });
+
+  it('reports whether git events arrive for the repo', async () => {
+    expect((await getIf(null)).headers.get('x-tree-live-events')).toBe('1');
+    db.gitEvent.findFirst.mockResolvedValue(null);
+    expect((await getIf(null)).headers.get('x-tree-live-events')).toBe('0');
+    expect(db.gitEvent.findFirst).toHaveBeenCalledWith({
+      where: { repoId: 'r1' },
+      select: { id: true },
+    });
+  });
+});
 
 describe('POST /api/repos/:repoId/tree/sync', () => {
   it('401 without a session', async () => {

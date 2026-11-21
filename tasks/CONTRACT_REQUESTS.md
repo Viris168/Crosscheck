@@ -219,3 +219,11 @@ local workaround. The owner applies approved changes on `main`; then rebase.
   set, so squash commits draw as normal circles until this lands.
 - **Status:** applied as `mergeCommitSha: Sha.nullable().default(null)` (PR fix/shared-tree-merge-commit-sha).
   T3a fills it in `@app/git-graph`; T4 passes the squash SHAs to `layoutTree`.
+
+### [Task T5c] `liveEvents` on the GET /tree response
+- **Change:** `liveEvents: z.boolean().default(true)` on `GetTreeResponse` (`packages/shared/src/api/tree.ts`):
+  false when no `GitEvent` row exists for the repo (the GitHub App is not subscribed to Push/Check/Status yet).
+- **Why:** T5c shows a one-line hint linking to the App permissions doc when git events are missing.
+- **Workaround in use:** GET /tree sends a `x-tree-live-events: 1|0` response header (also on 304s);
+  `useTree` reads it into a client-only `TreeData.liveEvents`. Drop the header once this lands.
+- **Status:** requested
