@@ -47,6 +47,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # @app/git-graph oracle tests compare against real git and need >= 2.44 (GIT_NO_LAZY_FETCH).
+      - name: git version (>= 2.44)
+        run: |
+          git --version
+          git --version | awk '{ split($3, v, "."); if (v[1] < 2 || (v[1] == 2 && v[2] < 44)) { print "::error::git >= 2.44 required"; exit 1 } }'
+
       - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
 
       - uses: actions/setup-node@v5
@@ -121,5 +127,12 @@ jobs:
           context: .
           file: infra/docker/web.Dockerfile
           push: false
+          load: true
+          tags: ai-review-web:ci
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
+
+      - name: Image smoke (non-root, git >= 2.44, repo cache dir)
+        run: |
+          docker run --rm ai-review-web:ci git --version
+          docker run --rm ai-review-web:ci sh -c 'test "$(id -u)" != 0 && test -w "$REPO_CACHE_DIR" && echo "uid=$(id -u) REPO_CACHE_DIR=$REPO_CACHE_DIR writable"'

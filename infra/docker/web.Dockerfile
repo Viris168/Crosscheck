@@ -12,9 +12,15 @@
 ARG NODE_VERSION=22
 ARG PNPM_VERSION=11.21.0
 ARG TURBO_VERSION=2.11.11
+# Debian release for every stage. trixie (13) because the runner needs git >= 2.44 (GIT_NO_LAZY_FETCH,
+# see tasks/T-branch-tree.md → Privacy rules) and trixie ships 2.47 natively. bookworm ships 2.39 and
+# bookworm-backports has no newer git; pulling trixie's git into bookworm would also replace libc6 and
+# libssl, so the whole image moves to trixie instead (builder too, so native modules and the Prisma
+# engine are built against the same libc/openssl they run on).
+ARG DEBIAN_RELEASE=trixie
 
 # ---------------------------------------------------------------- base
-FROM node:${NODE_VERSION}-bookworm-slim AS base
+FROM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS base
 ARG PNPM_VERSION
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
@@ -76,21 +82,31 @@ RUN set -eu; \
     mkdir -p /out/apps/web/.next/cache
 
 # ---------------------------------------------------------------- runner
-FROM node:${NODE_VERSION}-bookworm-slim AS runner
+FROM node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim AS runner
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
     NEXT_TELEMETRY_DISABLED=1 \
     CHECKPOINT_DISABLE=1 \
     PRISMA_HIDE_UPDATE_MESSAGE=1
+# git: commits-only clone cache for the branch tree (`git clone --bare --filter=tree:0`), >= 2.44.
+# The smoke step fails the build if the installed git is older.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssl ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends openssl ca-certificates git \
+ && rm -rf /var/lib/apt/lists/* \
+ && git --version \
+ && git --version | awk '{ split($3, v, "."); if (v[1] < 2 || (v[1] == 2 && v[2] < 44)) { print "git >= 2.44 required"; exit 1 } }'
 WORKDIR /app
 # App files are owned by root (read-only for the app user); only the Next cache is writable.
 COPY --from=builder /out/ /app/
 COPY --from=builder /opt/prisma /opt/prisma
-RUN chown -R node:node /app/apps/web/.next/cache
+# Repo clone cache (REPO_CACHE_DIR). Created here owned by `node` so a fresh named volume mounted on it
+# (infra/compose.prod.yml → repo-cache) inherits that ownership.
+ENV REPO_CACHE_DIR=/var/lib/app/repos
+RUN chown -R node:node /app/apps/web/.next/cache \
+ && mkdir -p /var/lib/app/repos \
+ && chown node:node /var/lib/app/repos \
+ && chmod 0700 /var/lib/app/repos
 # `node` (uid 1000) is the non-root user shipped with the official image.
 USER node
 EXPOSE 3000

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Nightly Postgres backup of BOTH databases (`app`, `inngest`): pg_dump → gzip.
+# Deliberately NOT backed up: the `repo-cache` volume (branch-tree clones). It is a cache, rebuilt by the
+# next sync, and it holds commit objects that must never leave the server (docs/deploy.md → 3.9).
 # Keeps 7 daily + 4 weekly (Sunday) copies; optional upload to S3-compatible storage.
 #
 #   infra/scripts/backup.sh                       # manual run

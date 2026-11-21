@@ -86,7 +86,7 @@ Production (later) runs the stack in `infra/compose.prod.yml` on one Ubuntu LTS 
 | Service | What | Reachable from |
 |---|---|---|
 | `caddy` | HTTPS (Let's Encrypt), security headers, 2 MB body limit on `/api/ingest` | internet: 80, 443 |
-| `web` | the Next.js app (`infra/docker/web.Dockerfile`), GHCR image `ghcr.io/<owner>/<repo>-web:sha-<commit>` | caddy, inngest |
+| `web` | the Next.js app (`infra/docker/web.Dockerfile`, Debian trixie + git ≥ 2.44), GHCR image `ghcr.io/<owner>/<repo>-web:sha-<commit>`, volume `repo-cache` | caddy, inngest |
 | `migrate` | same image, one-shot `prisma migrate deploy`; `web` starts after it exits 0 | — |
 | `inngest` | self-hosted Inngest (`inngest start`, Postgres DB `inngest` + Redis) | web; dashboard on the VPS's `127.0.0.1:8288` (SSH tunnel) |
 | `postgres` | Postgres 16, DBs `app` and `inngest`, volume `pgdata` | internal network only |
@@ -136,12 +136,13 @@ GitHub → Settings → Developer settings → GitHub Apps → New (or under you
 - **Callback URL** (Better Auth login): `https://DOMAIN/api/auth/callback/github`
 - **Webhook URL:** `https://DOMAIN/api/webhooks/github` · **Webhook secret:** `openssl rand -hex 32`
 - **Repository permissions:** Pull requests **Read & write**, Contents **Read & write** (write is only
-  for the dashboard's Merge button), Checks **Read & write**, Metadata **Read**, Issues **Read** (for comments)
+  for the dashboard's Merge button), Checks **Read & write**, Metadata **Read**, Issues **Read** (for comments),
+  Commit statuses **Read** (branch tree CI state)
 - Raising a permission on an existing App: GitHub asks each installation's owner to accept it
   (org/user Settings → GitHub Apps → Configure → *Review request*). Until they do, Merge returns 403.
 - **Organization permissions:** Members **Read** (sign-in sync checks GitHub org membership)
 - **Subscribe to events:** Pull request, Issue comment, Installation (always on), Installation
-  repositories, Organization, Member
+  repositories, Organization, Member, Push, Check run, Check suite, Status (the last four: branch tree)
 - **User-to-server tokens:** keep **Expire user authorization tokens** on (the default). Login uses the
   App's own OAuth client (`GITHUB_CLIENT_ID`), so Better Auth stores a GitHub App user token, and the
   sign-in sync calls `GET /user/installations` with it. Those tokens last 8 hours and come with a
@@ -174,6 +175,13 @@ Until the client accepts:
 
 Accepting sends `installation.new_permissions_accepted`, which clears the banner; members sync at their
 next sign-in or via **Check again**.
+
+**Branch tree (Commit statuses Read + Push, Check run, Check suite, Status events).** Adding these is the
+same kind of change: each installation's owner gets a *Review request* and must accept it. Nothing breaks
+before they do, it is just less fresh: CI shows `none` on every branch (the platform can't read commit
+statuses, and check runs arrive without their events), and the tree doesn't update on push; it is
+refreshed by the 15-minute cron and the **Sync** button instead. After accepting, the next push or CI
+event updates the tree within seconds.
 
 ### 3.4 Secrets
 ```bash
@@ -242,6 +250,22 @@ ssh deploy@VPS /opt/app/infra/scripts/compose.sh ps  # all running, web healthy,
   same `INNGEST_SIGNING_KEY` is passed to both).
 
 ### 3.9 Backups + restore
+**Not backed up: the `repo-cache` volume.** `web` keeps one commits-only clone per repo
+(`git clone --bare --filter=tree:0`) in `/var/lib/app/repos/<githubRepoId>.git` (`REPO_CACHE_DIR`). It is a
+cache: if it is lost, the next sync clones again. `backup.sh` leaves it out on purpose, and it must not be
+exported or copied off the server: the commit objects in it contain commit messages (treat it like
+Postgres). To drop it (e.g. after moving servers or to free space):
+`compose.sh stop web && docker volume rm ai-review_repo-cache && compose.sh up -d web`.
+
+- **Size:** commits only (no trees, no blobs), so roughly 0.5–1 KB per commit: a 50k-commit repo is
+  ~25–50 MB. Budget ~2 GB on the VPS disk and watch it with `docker system df -v | grep repo-cache`.
+  Docker named volumes have no built-in size cap on the default `local` driver; if you need a hard cap,
+  put `/var/lib/docker/volumes/ai-review_repo-cache` on its own small filesystem (or LVM volume).
+- **Cleanup:** a clone whose repo was removed from the platform (App uninstalled, repo deselected) is
+  never read again. Delete it by hand when it matters:
+  `compose.sh exec web sh -c 'ls -la "$REPO_CACHE_DIR"'`, then `rm -rf "$REPO_CACHE_DIR/<githubRepoId>.git"`.
+  Deleting a clone of an active repo is also safe; it just makes the next sync a full clone.
+
 `infra/scripts/backup.sh` (cron 03:15 UTC, logs to `/opt/app/backups/backup.log`) dumps **both** databases
 (`app`, `inngest`) with `pg_dump` → gzip into `/opt/app/backups/daily/`, copies Sunday's to `weekly/`, and
 keeps 7 daily + 4 weekly per database.
