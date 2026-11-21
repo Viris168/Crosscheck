@@ -1,6 +1,6 @@
 'use client';
 
-import type { ErrorCode, GetTreeResponse } from '@app/shared/client';
+import type { ErrorCode } from '@app/shared/client';
 import { RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
@@ -8,12 +8,14 @@ import { QueryError } from '@/components/query-error';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useSyncTree, useTree } from '@/hooks/use-tree';
+import { useSyncTree, useTree, type TreeData } from '@/hooks/use-tree';
 import { ApiError } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
+import { LastUpdated } from './last-updated';
 import { layoutTree, squashShas, TreeGraph } from './layout';
 import { TreeDetails } from './tree-details';
 import { TreeSvg, type Selection } from './tree-svg';
+import { useRowChanges } from './use-row-changes';
 
 // The prototype's colour tokens, as CSS variables scoped to the tree (light + `.dark`). Panel, text,
 // muted and border come from our theme (--card, --foreground, --muted-foreground, --border).
@@ -31,6 +33,11 @@ const FAILURE: Partial<Record<ErrorCode, string>> = {
   rate_limited: 'GitHub rate-limited us while reading this repository.',
 };
 
+// VERIFY: GitHub's page for accepting an App's updated permissions (also linked from docs/deploy.md
+// → "Upgrading an existing install").
+export const APP_PERMISSIONS_DOC =
+  'https://docs.github.com/en/apps/using-github-apps/approving-updated-permissions-for-a-github-app';
+
 export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullName: string }) {
   const tree = useTree(repoId);
   const sync = useSyncTree(repoId);
@@ -42,7 +49,7 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
         ? 'Could not start a refresh. Try again.'
         : null;
 
-  const header = (data?: GetTreeResponse) => (
+  const header = (data?: TreeData) => (
     <div className="mb-3 flex flex-wrap items-center gap-3">
       <h2 className="mr-auto text-[15px] font-semibold">Repository tree</h2>
       {data?.status === 'syncing' && data.snapshot && (
@@ -50,11 +57,7 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
           Updating…
         </span>
       )}
-      {data?.syncedAt && (
-        <span className="text-xs text-muted-foreground">
-          Synced {new Date(data.syncedAt).toLocaleString()}
-        </span>
-      )}
+      {data?.syncedAt && <LastUpdated at={data.syncedAt} />}
       <Button
         variant="outline"
         size="sm"
@@ -95,6 +98,20 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
           </Button>
         </Alert>
       )}
+      {data.snapshot && data.liveEvents === false && data.status !== 'syncing' && (
+        <p data-testid="live-hint" className="text-xs text-muted-foreground">
+          No push events from GitHub yet, so this tree refreshes every 15 minutes, not live.{' '}
+          <a
+            href={APP_PERMISSIONS_DOC}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-foreground underline underline-offset-4"
+          >
+            Accept the GitHub App&apos;s new permissions
+          </a>{' '}
+          to update it within seconds of a push.
+        </p>
+      )}
       {data.snapshot ? (
         <TreeBody
           data={data}
@@ -115,19 +132,21 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
 
 function TreeBody({
   data,
-  snapshot,
+  snapshot: latest,
   header,
   repoId,
   repoFullName,
 }: {
-  data: GetTreeResponse;
-  snapshot: NonNullable<GetTreeResponse['snapshot']>;
+  data: TreeData;
+  snapshot: NonNullable<TreeData['snapshot']>;
   header: ReactNode;
   repoId: string;
   repoFullName: string;
 }) {
   const router = useRouter();
   const [selection, setSelection] = useState<Selection>({ type: 'repo' });
+  // Live updates: draw the latest snapshot, animating rows whose head moved, new and deleted rows.
+  const { shown: snapshot, changes } = useRowChanges(latest);
   const graph = useMemo(() => new TreeGraph(snapshot.commits), [snapshot]);
   const layout = useMemo(
     () => layoutTree(snapshot, graph, squashShas(snapshot)),
@@ -166,6 +185,7 @@ function TreeBody({
               selection={selection}
               onSelect={setSelection}
               onEnter={onEnter}
+              changes={changes}
             />
           </div>
           <Legend />
