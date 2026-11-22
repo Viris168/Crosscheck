@@ -12,7 +12,7 @@ import type * as GithubModule from '@app/github';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedBranches, seedSnapshot, SEED_SHA } from '@/components/tree/__fixtures__/seed-snapshot';
 import { scaleRepo, scaleSnapshot } from '@/components/tree/__fixtures__/scale-repo';
-import { MINE_PRS_HEADER, NOT_COMPUTED } from '@/components/tree/scale-contract';
+import { NOT_COMPUTED } from '@/components/tree/scale-contract';
 
 // ---------------------------------------------------------------- mocks
 
@@ -289,19 +289,10 @@ describe('GET /api/repos/:repoId/tree?visible=', () => {
     expect(body.snapshot!.branches.find((b) => b.name === 'dev')!.ahead).toBe(NOT_COMPUTED);
   });
 
-  it("sends the viewer's PR numbers in x-tree-mine-prs", async () => {
+  it("returns the viewer's GitHub login for the mine filter", async () => {
     db.repoGraph.findUnique.mockResolvedValue(stored());
-    db.pullRequest.findMany.mockImplementation(
-      async ({ where }: { where: { author?: string; number?: { in: number[] } } }) =>
-        where.author === 'octo' ? [{ number: 3 }, { number: 2 }] : [],
-    );
-    const res = await tree();
-    expect(res.headers.get(MINE_PRS_HEADER)).toBe('2,3');
-    expect(db.pullRequest.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ repoId: 'r1', author: 'octo' }),
-      }),
-    );
+    const body = GetTreeResponse.parse(await (await tree()).json());
+    expect(body.viewerLogin).toBe('octo');
   });
 });
 

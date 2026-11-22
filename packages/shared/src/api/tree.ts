@@ -46,6 +46,8 @@ export const BranchPrSchema = z.object({
   number: z.number().int().positive(),
   state: z.enum(PullRequestState),
   baseRef: BranchName,
+  /** GitHub login of the PR's author (the "mine" filter). Null in snapshots written before it existed. */
+  author: z.string().max(100).nullable().default(null),
 });
 
 export const BranchNodeSchema = z.object({
@@ -61,6 +63,8 @@ export const BranchNodeSchema = z.object({
   ambiguous: z.number().int().min(2).nullable(),
   /** Fell back to the default branch because the choices formed a loop. */
   loop: z.boolean(),
+  /** Commit time of the head (the "stale" filter). Null when unknown or in older snapshots. */
+  headCommittedAt: IsoDate.nullable().default(null),
   /** -1 = not computed (lazy table, `buildSnapshot({ visible })`); `mergeBase` is then null. */
   ahead: z.number().int().min(-1),
   behind: z.number().int().min(-1),
@@ -125,6 +129,8 @@ export const GetTreeResponse = z.object({
   snapshot: TreeSnapshotSchema.nullable(),
   /** Write access: may set compare-with overrides. */
   canEdit: z.boolean(),
+  /** The viewer's GitHub login, compared with `pr.author` for the "mine" filter. */
+  viewerLogin: z.string().nullable().default(null),
 });
 export type GetTreeResponse = z.infer<typeof GetTreeResponse>;
 

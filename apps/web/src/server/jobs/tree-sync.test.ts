@@ -751,6 +751,7 @@ describe('applyContentMerged', () => {
   const node = (name: string, headSha: string, extra: object = {}) => ({
     name,
     headSha,
+    headCommittedAt: null,
     isDefault: false,
     compareWith: 'main' as string | null,
     why: 'inferred' as const,

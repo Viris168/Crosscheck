@@ -122,6 +122,7 @@ const base = {
   pr: null,
   ci: 'none',
   recorded: false,
+  headCommittedAt: null,
 } satisfies Partial<BranchNode>;
 
 const treeBranches: BranchNode[] = [
@@ -155,7 +156,7 @@ const treeBranches: BranchNode[] = [
       newCommits: 0,
       mergeCommitSha: C.c4,
     },
-    pr: { number: 1, state: 'merged', baseRef: 'main' },
+    pr: { number: 1, state: 'merged', baseRef: 'main', author: null },
     ci: 'success',
   },
   {
@@ -179,7 +180,7 @@ const treeBranches: BranchNode[] = [
     ahead: 3,
     behind: 1,
     mergeBase: C.d1,
-    pr: { number: 2, state: 'open', baseRef: 'dev' },
+    pr: { number: 2, state: 'open', baseRef: 'dev', author: null },
     ci: 'success',
   },
   {
@@ -204,7 +205,7 @@ const treeBranches: BranchNode[] = [
     ahead: 1,
     behind: 0,
     mergeBase: C.c4,
-    pr: { number: 3, state: 'open', baseRef: 'main' },
+    pr: { number: 3, state: 'open', baseRef: 'main', author: null },
     ci: 'failure',
   },
 ];

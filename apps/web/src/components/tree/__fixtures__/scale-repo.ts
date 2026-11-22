@@ -114,6 +114,7 @@ export function scaleRepo({
         state: merged ? 'merged' : 'open',
         headSha: b.headSha,
         mergeMethod: merged ? 'merge' : null,
+        author: i % 7 === 0 ? 'octo' : 'someone',
       });
       if (i % 7 === 0) minePrs.push(number);
       ci[b.headSha] = merged ? 'success' : rand() < 0.125 ? 'failure' : 'success';

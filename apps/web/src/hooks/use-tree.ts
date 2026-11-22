@@ -10,7 +10,7 @@ import {
 } from '@app/shared/client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { isComputed, MINE_PRS_HEADER } from '@/components/tree/scale-contract';
+import { isComputed } from '@/components/tree/scale-contract';
 import { ApiError, apiFetch } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 
@@ -33,8 +33,6 @@ export type TreeData = GetTreeResponse & {
   liveEvents?: boolean | null;
   /** Set by a Refresh click: show "syncing" until the server changes or the grace period ends. */
   syncRequestedAt?: number;
-  /** PR numbers the viewer opened (the "mine" filter); from the last 200 response. */
-  minePrs?: number[];
 };
 
 /** True when some branch still has NOT_COMPUTED counts: only then is `visible` worth sending. */
@@ -48,12 +46,6 @@ export function treeUrl(repoId: string, visible: readonly string[] = []): string
   for (const v of visible.slice(0, TREE_MAX_VISIBLE)) p.append('visible', v);
   return `${base}?${p}`;
 }
-
-const parseMine = (h: string | null) =>
-  (h ?? '')
-    .split(',')
-    .map(Number)
-    .filter((n) => Number.isSafeInteger(n) && n > 0);
 
 /**
  * GET /tree with `If-None-Match`: 304 keeps the cached object (same reference, so nothing re-renders).
@@ -86,7 +78,6 @@ export async function fetchTree(
     ...body,
     etag: res.headers.get('etag') ?? undefined,
     liveEvents: live === '1' ? true : live === '0' ? false : null,
-    minePrs: parseMine(res.headers.get(MINE_PRS_HEADER)),
   };
 }
 

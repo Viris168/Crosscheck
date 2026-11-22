@@ -8,7 +8,7 @@ import { renderWithQuery } from '../../../test/render';
 import { scaleRepo, scaleSnapshot } from './__fixtures__/scale-repo';
 import { seedSnapshot } from './__fixtures__/seed-snapshot';
 import { BranchTree } from './branch-tree';
-import { MINE_PRS_HEADER, NOT_COMPUTED } from './scale-contract';
+import { NOT_COMPUTED } from './scale-contract';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -27,6 +27,7 @@ const body = (snapshot: TreeSnapshot) =>
     errorCode: null,
     snapshot,
     canEdit: false,
+    viewerLogin: 'octo',
   });
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -38,7 +39,7 @@ function serve(
     if (url.includes('/tree/compare'))
       return opts.compare?.() ?? Response.json({ ahead: 4, behind: 2, mergeBase: null });
     const snap = opts.tree?.(url) ?? snapshot;
-    return Response.json(body(snap), { headers: { [MINE_PRS_HEADER]: minePrs.join(',') } });
+    return Response.json(body(snap));
   });
   vi.stubGlobal('fetch', fetchMock);
 }

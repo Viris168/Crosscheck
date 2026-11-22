@@ -187,17 +187,17 @@ function TreeBody({
   const { shown: snapshot, changes } = useRowChanges(latest);
   const graph = useMemo(() => new TreeGraph(snapshot.commits), [snapshot]);
   const squash = useMemo(() => squashShas(snapshot), [snapshot]);
-  const minePrs = data.minePrs;
+  const viewerLogin = data.viewerLogin;
   const ctx = useMemo<MatchContext>(
     () => ({
-      minePrs: new Set(minePrs ?? []),
+      viewerLogin,
       headTime: (sha) => {
         const t = Date.parse(graph.commit(sha)?.committedAt ?? '');
         return Number.isFinite(t) ? t : null;
       },
       now,
     }),
-    [minePrs, graph, now],
+    [viewerLogin, graph, now],
   );
   const rows = useMemo(
     () => viewRows(snapshot, { view, ctx, collapsed, mergedOpen }),
