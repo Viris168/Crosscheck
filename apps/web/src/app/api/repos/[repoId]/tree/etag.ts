@@ -1,13 +1,6 @@
 import { createHash } from 'node:crypto';
 
 /**
- * Response header (T5c workaround until `GetTreeResponse.liveEvents` lands, see
- * tasks/CONTRACT_REQUESTS.md): `1` when at least one GitEvent was stored for the repo, `0` when none
- * (the GitHub App is not subscribed to Push/Check/Status events yet, so the tree only refreshes on cron).
- */
-export const LIVE_EVENTS_HEADER = 'x-tree-live-events';
-
-/**
  * Weak ETag for GET /tree. Built from the sync state (`syncedAt`, plus `updatedAt` for status/error
  * changes), the caller's edit right, the compare-with overrides (applied at read time) and whether git
  * events arrive. Anything else in the body only changes when a sync writes a new snapshot.

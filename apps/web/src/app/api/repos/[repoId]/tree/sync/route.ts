@@ -4,7 +4,7 @@ import { json, route } from '@/lib/server/http';
 import { requireSession } from '@/server/auth';
 import {
   requestInSlot,
-  requestTreeSync,
+  startTreeSync,
   SYNC_RATE_WINDOW_SECONDS,
   syncKey,
   takeSlot,
@@ -24,6 +24,6 @@ export const POST = route<{ repoId: string }>(async (req, params) => {
       'This repository was refreshed less than a minute ago. Try again soon.',
     );
   }
-  await requestInSlot(syncKey(repoId), () => requestTreeSync(repoId, repo.orgId, 'manual'));
+  await requestInSlot(syncKey(repoId), () => startTreeSync(repoId, repo.orgId, 'manual'));
   return json(SyncTreeResponse, { queued: true });
 });

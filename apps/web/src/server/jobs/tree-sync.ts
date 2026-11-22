@@ -13,6 +13,7 @@ import {
   type Lookup,
   type PrRecord,
 } from '@app/git-graph';
+import type { TreePr } from '@app/github';
 import {
   TREE_MAX_BRANCHES,
   TREE_MAX_COMMITS,
@@ -31,20 +32,7 @@ type Reason = (typeof TreeSyncReason)[number];
 
 // --- GitHub reads (T2b's `@app/github` tree functions, bound to one installation) ---
 
-/** Mirrors T2b's `TreePr` (tasks/T2b-github-reads.md). */
-export interface TreePr {
-  number: number;
-  state: 'open' | 'closed' | 'merged';
-  headRef: string;
-  headSha: string;
-  baseRef: string;
-  baseSha: string | null;
-  mergedAt: string | Date | null;
-  mergeCommitSha: string | null;
-  title: string;
-  author: string;
-  updatedAt: string | Date;
-}
+export type { TreePr };
 
 export interface TreeRepo extends CacheRepo {
   id: string;
@@ -76,6 +64,12 @@ export interface TreeCache {
     truncated: boolean;
     missing: ReadonlySet<string>;
   }>;
+  /** Keep the graph the snapshot was built from for the API (T6a graph cache). */
+  saveGraph(
+    repo: CacheRepo,
+    heads: readonly { name: string; headSha: string }[],
+    graph: CommitGraph,
+  ): Promise<void>;
 }
 
 // --- DB access ---
@@ -473,6 +467,7 @@ export async function rebuildSnapshotSteps(
       });
       const headOf = new Map(branches.map((b) => [b.name, b.headSha]));
       const truncated = graph.truncated || capped.length < all.length;
+      const commitGraph = new CommitGraph(graph.commits);
       let snapshot: TreeSnapshot | undefined;
       for (const cap of COMMIT_CAPS) {
         const built = buildSnapshot({
@@ -484,7 +479,7 @@ export async function rebuildSnapshotSteps(
             // "recorded" only when the push webhook saw a parent; zero matches → the engine infers.
             recorded: b.recordedAt !== null && b.recordedParents.length > 0,
           })),
-          graph: graph.commits,
+          graph: commitGraph,
           prs,
           overrides,
           ci,
@@ -508,6 +503,11 @@ export async function rebuildSnapshotSteps(
         defaultBranch: def.name,
         snapshot: snapshot!,
         syncedAt: deps.now(),
+      });
+      // After the snapshot: a reader that comes in between sees other heads than the old file was
+      // written for, ignores it and reads the clone. Only a cache, so a failed write never fails the sync.
+      await cache.saveGraph(repo, branches, commitGraph).catch(() => {
+        log.warn({ repoId, reason: 'graph_cache_failed' }, 'tree-sync: graph cache write failed');
       });
       return {
         branches: snapshot!.branches.length,
@@ -874,9 +874,9 @@ export async function githubCall<T>(fn: () => Promise<T>, message: string): Prom
   }
 }
 
-function toDate(v: string | Date | null | undefined): Date | null {
+function toDate(v: string | null): Date | null {
   if (!v) return null;
-  const d = v instanceof Date ? v : new Date(v);
+  const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 

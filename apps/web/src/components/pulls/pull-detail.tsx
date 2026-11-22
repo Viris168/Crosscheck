@@ -87,6 +87,12 @@ function PullDetailView({ data, repoId }: { data: PullDetailData; repoId: string
           </span>
           <DiffStat additions={pull.additions} deletions={pull.deletions} />
           <span className="text-muted-foreground">{pull.changedFiles} files</span>
+          <Link
+            className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            href={`/repos/${repoId}/tree?${new URLSearchParams({ q: pull.headRef })}`}
+          >
+            Show in branch tree
+          </Link>
           <a
             href={pull.htmlUrl}
             target="_blank"

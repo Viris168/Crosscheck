@@ -112,10 +112,10 @@ export const TreeSnapshotSchema = z
   });
 export type TreeSnapshot = z.infer<typeof TreeSnapshotSchema>;
 
-/** GET /api/repos/:repoId/tree?at=<ISO> (`at`: milestone 8 only). */
 /** Most branch names GET /tree computes per request (the rows on screen). */
 export const TREE_MAX_VISIBLE = 200;
 
+/** GET /api/repos/:repoId/tree?at=<ISO> (`at`: milestone 8 only). */
 export const GetTreeQuery = z.object({
   at: IsoDate.optional(),
   /** branches on screen, sent as `?visible=a&visible=b`: only these rows (and their chains) are computed */
@@ -131,6 +131,11 @@ export const GetTreeResponse = z.object({
   canEdit: z.boolean(),
   /** The viewer's GitHub login, compared with `pr.author` for the "mine" filter. */
   viewerLogin: z.string().nullable().default(null),
+  /**
+   * false = no git event (push, check, status, …) was ever recorded for this repo: the GitHub App is not
+   * subscribed to them yet, so the tree only refreshes on the 15-minute cron.
+   */
+  liveEvents: z.boolean().default(true),
 });
 export type GetTreeResponse = z.infer<typeof GetTreeResponse>;
 

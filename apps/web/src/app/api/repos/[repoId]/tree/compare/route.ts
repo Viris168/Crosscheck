@@ -39,8 +39,9 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
   const repo = await requireRepoAccess(session.user.id, repoId);
   if (a === b) throw new HttpError('bad_request', 'Pick two different branches.');
 
+  // All live branches: together they name the graph the sync stored (T6a cache).
   const rows = await prisma.branch.findMany({
-    where: { repoId, deletedAt: null, name: { in: [a, b] } },
+    where: { repoId, deletedAt: null },
     select: { name: true, headSha: true },
   });
   const headA = rows.find((r) => r.name === a)?.headSha;
@@ -51,7 +52,7 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
   const hit = await cached(key);
   if (hit) return json(CompareResponse, hit, { headers: { 'cache-control': 'private, no-cache' } });
 
-  const graph = await loadCommitGraph(repo, [headA, headB]);
+  const graph = await loadCommitGraph(repo, rows);
   if (!graph || !graph.has(headA) || !graph.has(headB))
     throw new HttpError(
       'conflict',

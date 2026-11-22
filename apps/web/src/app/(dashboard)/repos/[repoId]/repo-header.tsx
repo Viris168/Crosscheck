@@ -1,18 +1,24 @@
 import 'server-only';
-import { prisma } from '@app/db';
+import { HttpError } from '@app/shared';
 import { notFound } from 'next/navigation';
 import { LinkTabs } from '@/components/ui/link-tabs';
+import { requireRepoAccess } from '@/lib/server/access';
 import { getDashboardContext } from '@/lib/server/dashboard';
 
-/** Loads the repo for a page, enforcing org membership (404 otherwise — no existence leak). */
+/**
+ * Loads the repo for a page with the same rule as the API routes (`requireRepoAccess`: org owner/admin, or a
+ * GitHub collaborator). Everyone else gets the 404 page: no existence leak, no repo name.
+ */
 export async function loadRepoForPage(repoId: string) {
   const { session } = await getDashboardContext();
-  const repo = await prisma.repo.findFirst({
-    where: { id: repoId, org: { members: { some: { userId: session.user.id } } } },
-    select: { id: true, fullName: true },
-  });
-  if (!repo) notFound();
-  return repo;
+  try {
+    const { id, fullName } = await requireRepoAccess(session.user.id, repoId);
+    return { id, fullName };
+  } catch (err) {
+    if (err instanceof HttpError && (err.code === 'not_found' || err.code === 'forbidden'))
+      notFound();
+    throw err; // e.g. GitHub did not answer the collaborator check: fail closed
+  }
 }
 
 export function RepoHeader({

@@ -20,17 +20,13 @@ export const TREE_POLL_MS = 3000;
 export const TREE_IDLE_MS = 10 * 60_000;
 /** How long a Refresh click shows "syncing" while the server has not changed yet. */
 export const SYNC_GRACE_MS = 60_000;
-/** Response header set by GET /tree (workaround until `GetTreeResponse.liveEvents` lands). */
-export const LIVE_EVENTS_HEADER = 'x-tree-live-events';
 /** Rows on screen settle this long before they are reported to useTree (T6b; the tree layer waits). */
 export const VISIBLE_DEBOUNCE_MS = 150;
 
-/** What the page caches: the response plus the validator and the live-events signal (client only). */
+/** What the page caches: the response plus the validator (client only). */
 export type TreeData = GetTreeResponse & {
   /** ETag of the server state this data came from; sent back as `If-None-Match`. */
   etag?: string;
-  /** false when GitHub has sent no git events for this repo yet; null when unknown. */
-  liveEvents?: boolean | null;
   /** Set by a Refresh click: show "syncing" until the server changes or the grace period ends. */
   syncRequestedAt?: number;
 };
@@ -73,12 +69,7 @@ export async function fetchTree(
   }
   if (!res.ok) throw await ApiError.from(res);
   const body: GetTreeResponse = GetTreeResponse.parse(await res.json());
-  const live = res.headers.get(LIVE_EVENTS_HEADER);
-  return {
-    ...body,
-    etag: res.headers.get('etag') ?? undefined,
-    liveEvents: live === '1' ? true : live === '0' ? false : null,
-  };
+  return { ...body, etag: res.headers.get('etag') ?? undefined };
 }
 
 /**

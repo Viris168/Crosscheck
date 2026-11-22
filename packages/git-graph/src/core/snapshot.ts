@@ -43,8 +43,6 @@ export interface SnapshotInput {
 }
 
 /** `BranchNode.ahead` / `.behind` for rows the lazy table did not compute (`buildSnapshot({ visible })`). */
-// VERIFY: `BranchNodeSchema` (packages/shared) rejects -1 until the T6a request in
-// tasks/CONTRACT_REQUESTS.md is applied; T6b uses the same sentinel.
 export const NOT_COMPUTED = -1;
 
 export function buildSnapshot(input: SnapshotInput): TreeSnapshot {

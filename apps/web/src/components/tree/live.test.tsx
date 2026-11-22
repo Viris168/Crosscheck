@@ -20,7 +20,6 @@ const NOW = Date.parse('2026-11-20T10:00:10.000Z');
 const server = {
   version: 1,
   body: null as unknown as GetTreeResponse,
-  live: '1',
   sync: () => Response.json({ queued: true }),
 };
 const etag = () => `W/"v${server.version}"`;
@@ -55,14 +54,13 @@ beforeEach(() => {
     toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
   });
   server.version = 0;
-  server.live = '1';
   setTree();
   visibility = 'visible';
   vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
   fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
     if (init?.method === 'POST') return server.sync();
     const inm = (init?.headers as Record<string, string> | undefined)?.['if-none-match'];
-    const headers = { etag: etag(), 'x-tree-live-events': server.live };
+    const headers = { etag: etag() };
     if (inm === etag()) return new Response(null, { status: 304, headers });
     return Response.json(server.body, { headers });
   });
@@ -290,7 +288,7 @@ describe('header and hint', () => {
   });
 
   it('hints at the App permissions when no git events arrived for the repo', async () => {
-    server.live = '0';
+    setTree({ liveEvents: false });
     await renderTree();
     const hint = screen.getByTestId('live-hint');
     expect(hint.textContent).toContain('refreshes every 15 minutes');

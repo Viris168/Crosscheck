@@ -1,7 +1,7 @@
 'use client';
 
 import { isActionProvider, type RepoListItem } from '@app/shared/client';
-import { Settings2 } from 'lucide-react';
+import { GitBranch, Settings2 } from 'lucide-react';
 import Link from 'next/link';
 import { ProviderBadge, StaleBadge, StatusChip } from '@/components/chips';
 import { InstallAppButton } from '@/components/install-app-button';
@@ -73,6 +73,13 @@ export function RepoList({
             ) : (
               <span className="text-xs text-muted-foreground">No reviews yet</span>
             )}
+            <Link
+              className={buttonVariants({ size: 'sm', variant: 'ghost' })}
+              href={`/repos/${r.id}/tree`}
+              aria-label={`Branches of ${r.fullName}`}
+            >
+              <GitBranch aria-hidden /> Branches
+            </Link>
             {needsSetup(r) ? (
               <Link className={buttonVariants({ size: 'sm' })} href={`/repos/${r.id}/setup`}>
                 Set up

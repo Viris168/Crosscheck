@@ -12,16 +12,17 @@ import { isComputed } from '@/components/tree/scale-contract';
 import { canEditRepo, requireRepoAccess } from '@/lib/server/access';
 import { json, queryOf, route } from '@/lib/server/http';
 import { requireSession } from '@/server/auth';
+import { recordTreeView } from '@/server/jobs';
 import { logger } from '@/server/logger';
 import { buildSnapshot } from '@app/git-graph';
-import { etagMatches, LIVE_EVENTS_HEADER, treeEtag } from './etag';
+import { etagMatches, treeEtag } from './etag';
 import { loadCommitGraph } from './graph-source';
 import { loadOverrides, withOverrides } from './overrides';
 import {
   FIRST_VIEW_WINDOW_SECONDS,
   firstViewKey,
   requestInSlot,
-  requestTreeSync,
+  startTreeSync,
   takeSlot,
 } from './sync-request';
 
@@ -62,9 +63,8 @@ async function fillVisible(
   const todo = [...want].filter((n) => !isComputed(byName.get(n)!));
   if (!todo.length) return snapshot;
 
-  const heads = snapshot.branches.map((b) => b.headSha);
-  const graph = await loadCommitGraph(repo, heads);
-  if (!graph || heads.some((h) => !graph.has(h))) {
+  const graph = await loadCommitGraph(repo, snapshot.branches);
+  if (!graph || snapshot.branches.some((b) => !graph.has(b.headSha))) {
     logger.warn({ repoId: repo.id, rows: todo.length }, 'tree visible rows left uncomputed');
     return snapshot;
   }
@@ -116,9 +116,11 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
     ...queryOf(req),
     visible: visibleParam.length ? visibleParam : undefined,
   });
-  // VERIFY: T2d asks for 404 for a non-collaborator; requireRepoAccess (Task H) answers 403, like every
-  // other repo route. Kept consistent with H; unknown repos are 404.
+  // 403 for a non-collaborator, like every repo route since Task H (the page itself answers 404).
   const repo = await requireRepoAccess(session.user.id, repoId);
+  // `tree-cron` keeps repos viewed in the last 7 days fresh. Not awaited: never throws, and a slow Redis
+  // must not hold up the 3 s poll.
+  void recordTreeView(repoId);
 
   const [graph, canEdit] = await Promise.all([
     prisma.repoGraph.findUnique({ where: { repoId } }),
@@ -128,7 +130,7 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
   if (!graph) {
     if (await takeSlot(firstViewKey(repoId), FIRST_VIEW_WINDOW_SECONDS)) {
       const key = firstViewKey(repoId);
-      await requestInSlot(key, () => requestTreeSync(repoId, repo.orgId, 'first_view'));
+      await requestInSlot(key, () => startTreeSync(repoId, repo.orgId, 'first_view'));
     }
     return json(
       GetTreeResponse,
@@ -158,11 +160,7 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
     }),
     visible,
   );
-  const headers = {
-    etag,
-    'cache-control': CACHE_CONTROL,
-    [LIVE_EVENTS_HEADER]: liveEvents ? '1' : '0',
-  };
+  const headers = { etag, 'cache-control': CACHE_CONTROL };
   if (etagMatches(req.headers.get('if-none-match'), etag)) {
     return new Response(null, { status: 304, headers });
   }
@@ -187,6 +185,7 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
       snapshot,
       canEdit,
       viewerLogin: login,
+      liveEvents,
     },
     { headers },
   );

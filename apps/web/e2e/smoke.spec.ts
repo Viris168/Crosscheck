@@ -71,6 +71,27 @@ test('every review state renders from seed data', async ({ page }) => {
   }
 });
 
+test('Branches link → branch tree of the seed repo renders; PR links back into it', async ({
+  page,
+}) => {
+  await page.goto('/repos');
+  await page.getByRole('link', { name: 'Branches of acme/web' }).click();
+  await expect(page).toHaveURL(/\/repos\/seed_repo_web\/tree$/);
+  await expect(page.getByRole('link', { name: 'Branches', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(page.getByRole('heading', { name: 'Repository tree' })).toBeVisible();
+  for (const branch of ['main', 'dev', 'feature/login'])
+    await expect(page.locator(`[data-branch="${branch}"]`)).toBeVisible();
+
+  // A search in the URL shows only the matches and their compare-with ancestors.
+  await page.goto('/repos/seed_repo_web/pulls/42');
+  await page.getByRole('link', { name: 'Show in branch tree' }).click();
+  await expect(page).toHaveURL(/\/repos\/seed_repo_web\/tree\?q=/);
+  await expect(page.getByRole('heading', { name: 'Repository tree' })).toBeVisible();
+});
+
 test('settings, setup and connections pages render', async ({ page }) => {
   await page.goto('/repos/seed_repo_web/settings');
   await expect(page.getByRole('form', { name: 'Review settings' })).toBeVisible();

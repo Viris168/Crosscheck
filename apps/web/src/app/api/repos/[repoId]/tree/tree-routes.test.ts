@@ -46,7 +46,14 @@ vi.mock('@/server/logger', () => ({ logger: log }));
 const overrides = vi.hoisted(() => new Map<string, string>());
 
 const send = vi.hoisted(() => vi.fn());
-vi.mock('@/server/jobs', () => ({ inngest: { send } }));
+const recordTreeView = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('@/server/jobs', () => ({
+  requestTreeSync: (repoId: string, orgId: string, reason: string) =>
+    send({ name: 'tree/sync-requested', data: { repoId, orgId, reason } }),
+  recordTreeView,
+  loadTreeGraph: vi.fn(async () => null),
+  treeCloneDir: () => '/nonexistent/1.git',
+}));
 
 const perm = vi.hoisted(() => ({ getRepoCollaborator: vi.fn(), getRepoPermission: vi.fn() }));
 vi.mock('@/server/github', async () => ({
@@ -184,6 +191,19 @@ describe('GET /api/repos/:repoId/tree', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('records the view (tree-cron, tree-cleanup), also on a 304; not for someone without access', async () => {
+    const etag = (await getTree()).headers.get('etag')!;
+    expect(recordTreeView).toHaveBeenLastCalledWith('r1');
+    recordTreeView.mockClear();
+    const res = await GET(req('/api/repos/r1/tree', { headers: { 'if-none-match': etag } }), ctx());
+    expect(res.status).toBe(304);
+    expect(recordTreeView).toHaveBeenCalledTimes(1);
+    recordTreeView.mockClear();
+    perm.getRepoCollaborator.mockResolvedValue(false);
+    expect((await getTree()).status).toBe(403);
+    expect(recordTreeView).not.toHaveBeenCalled();
+  });
+
   it('canEdit is true for a writer', async () => {
     perm.getRepoPermission.mockResolvedValue('write');
     const body = GetTreeResponse.parse(await (await getTree()).json());
@@ -199,7 +219,8 @@ describe('GET /api/repos/:repoId/tree', () => {
       errorCode: null,
       snapshot: null,
       canEdit: false,
-      viewerLogin: null, // no snapshot yet, so no rows to filter: the login is not looked up
+      viewerLogin: null,
+      liveEvents: true, // no snapshot yet, so no rows to filter: the login is not looked up
     });
 
     await getTree();
@@ -305,10 +326,15 @@ describe('GET /tree conditional requests (T5c)', () => {
     expect((await getIf(etag)).status).toBe(403);
   });
 
-  it('reports whether git events arrive for the repo', async () => {
-    expect((await getIf(null)).headers.get('x-tree-live-events')).toBe('1');
+  it('reports whether git events arrive for the repo, in the body', async () => {
+    const live = await getIf(null);
+    expect(GetTreeResponse.parse(await live.json()).liveEvents).toBe(true);
+    expect(live.headers.has('x-tree-live-events')).toBe(false);
     db.gitEvent.findFirst.mockResolvedValue(null);
-    expect((await getIf(null)).headers.get('x-tree-live-events')).toBe('0');
+    // The first event changes the ETag, so a polling page sees the flag flip.
+    const none = await getIf(live.headers.get('etag'));
+    expect(none.status).toBe(200);
+    expect(GetTreeResponse.parse(await none.json()).liveEvents).toBe(false);
     expect(db.gitEvent.findFirst).toHaveBeenCalledWith({
       where: { repoId: 'r1' },
       select: { id: true },

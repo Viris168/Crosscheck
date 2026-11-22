@@ -53,7 +53,7 @@ describe.runIf(process.env.TREE_SCALE_MEASURE === '1')('tree scale (server)', ()
     const graph = time('CommitGraph from 50k commits', () => new CommitGraph(repo.commits), out);
     const visible = stored.branches.slice(200, 215).map((b) => b.name);
     time(
-      'buildSnapshot({ visible: 15 rows }) — T6a MOCK (full compute)',
+      'buildSnapshot({ visible: 15 rows })',
       () =>
         buildSnapshot({
           defaultBranch: repo.defaultBranch,

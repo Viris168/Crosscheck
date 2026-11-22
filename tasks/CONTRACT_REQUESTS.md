@@ -226,7 +226,7 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Why:** T5c shows a one-line hint linking to the App permissions doc when git events are missing.
 - **Workaround in use:** GET /tree sends a `x-tree-live-events: 1|0` response header (also on 304s);
   `useTree` reads it into a client-only `TreeData.liveEvents`. Drop the header once this lands.
-- **Status:** requested
+- **Status:** applied (PR feat/t7-integrate; `x-tree-live-events` removed)
 
 ### [Task T6a] "Not computed" sentinel for ahead/behind (lazy table)
 - **Change:** in `BranchNodeSchema` (`packages/shared/src/api/tree.ts`) allow `-1` for `ahead` and `behind`:
@@ -238,13 +238,15 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Workaround in use:** none in `@app/git-graph` (it only produces the values). Until this lands, a snapshot
   built with `visible` fails `TreeSnapshotSchema.parse`, so callers must not store/validate a lazy
   snapshot (store the full one; build lazy ones per request).
+- **Status:** applied (PR fix/tree-scale-contracts: `ahead`/`behind` `min(-1)`)
+
 ### [Task T6b] `visible` on `GetTreeQuery`
 - **Change:** `visible: z.array(BranchName).max(200).optional()` on `GetTreeQuery` (`packages/shared/src/api/tree.ts`),
   sent as a repeated query key (`?visible=a&visible=b`).
 - **Why:** T6b sends the branch names on screen so GET /tree computes only those rows (T6a lazy table).
 - **Workaround in use:** `GetTreeScaleQuery = GetTreeQuery.extend({ visible })` in
   `apps/web/src/components/tree/scale-contract.ts`; the route reads `searchParams.getAll('visible')`.
-- **Status:** applied (PR fix/tree-scale-contracts: `ahead`/`behind` `min(-1)`)
+- **Status:** applied (PR fix/tree-scale-contracts; `scale-contract.ts` workaround removed)
 
 ### [Task T6b] Lazy counts: `ahead` / `behind` may be `-1`
 - **Change:** `BranchNodeSchema.ahead` and `.behind` become `z.number().int().min(-1)`; `-1` = not computed
@@ -252,7 +254,7 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Why:** a lazy snapshot (T6a/T7) would fail `TreeSnapshotSchema` today, and the route would show it as failed.
 - **Workaround in use:** `LazyBranchNodeSchema` / `LazyTreeSnapshotSchema` / `LazyGetTreeResponse` in
   `scale-contract.ts`, used by GET /tree and `useTree`; the page shows `↑… ↓…` for such rows.
-- **Status:** applied (PR fix/tree-scale-contracts; `scale-contract.ts` workaround removed)
+- **Status:** applied (PR fix/tree-scale-contracts; `Lazy*` schemas removed, the real engine replaces `engine-t6a.ts`)
 
 ### [Task T6b] PR author + viewer login (the "mine" filter)
 - **Change:** `author: z.string()` (GitHub login) on `BranchPrSchema`, and `viewerLogin: z.string().nullable()` on
@@ -260,10 +262,10 @@ local workaround. The owner applies approved changes on `main`; then rebase.
 - **Why:** filter "mine" = PR author is the signed-in user; the snapshot has no author today.
 - **Workaround in use:** GET /tree sends `x-tree-mine-prs: <comma-separated PR numbers>` on 200s (PRs in the
   snapshot whose `PullRequest.author` = `User.login`); `useTree` reads it into a client-only `TreeData.minePrs`.
-- **Status:** applied (PR fix/tree-scale-contracts; `Lazy*` schemas removed, the real engine replaces `engine-t6a.ts`)
+- **Status:** applied (PR feat/tree-pr-author-head-time)
 
 ### [Task T6b] `headCommittedAt` on `BranchNodeSchema` (the "stale" filter)
 - **Change:** `headCommittedAt: IsoDate.nullable()` on `BranchNodeSchema`, filled by the engine from the graph.
 - **Why:** "stale (> 30 days)" needs the head commit time; with lazy snapshots the head commit may not be drawn.
 - **Workaround in use:** the page looks the head up in `snapshot.commits`; a head that is not drawn counts as not stale.
-- **Status:** requested
+- **Status:** applied (PR feat/tree-pr-author-head-time)

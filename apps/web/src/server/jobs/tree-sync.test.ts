@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { FixtureRepo } from '@app/git-graph/testing';
@@ -10,7 +10,9 @@ import {
   assertNoContents,
   cloneDir,
   ensureClone,
+  loadCloneGraph,
   readCloneGraph,
+  saveCloneGraph,
   type GitAuth,
   type RepoLock,
 } from './repo-cache';
@@ -174,7 +176,7 @@ function pr(over: Partial<TreePr> & Pick<TreePr, 'number' | 'headRef' | 'headSha
   return {
     state: 'open',
     baseRef: 'main',
-    baseSha: null,
+    baseSha: '0'.repeat(40),
     mergedAt: null,
     mergeCommitSha: null,
     title: 'Secret title: launch plans',
@@ -269,6 +271,7 @@ describe('tree-sync against a local fixture repo', () => {
       cache: {
         ensureClone: (r, a) => ensureClone(r, a, { cacheDir, lock, assertNoContents: true }),
         readGraph: (r, heads) => readCloneGraph(r, heads, { cacheDir, lock }),
+        saveGraph: (r, heads, graph) => saveCloneGraph(r, heads, graph, { cacheDir }),
       },
       merged: fm.merged,
       now: () => NOW,
@@ -304,6 +307,40 @@ describe('tree-sync against a local fixture repo', () => {
     expect(fake.db.prs.get(1)).toMatchObject({ state: 'open', headRef: 'feature/login' });
     expect(ciCalls.sort()).toEqual([repo.head('feature/login'), repo.head('main')].sort());
     await assertNoContents(cloneDir(cacheDir, REPO.githubRepoId));
+  });
+
+  it('stores the graph for the API; a refresh that moves any branch invalidates it', async () => {
+    const heads = () => repo.branches().map((name) => ({ name, headSha: repo.head(name) }));
+    const load = (h: { name: string; headSha: string }[]) => loadCloneGraph(REPO, h, { cacheDir });
+    await treeSyncHandler({ event, step: createFakeRunner().step }, deps);
+    const before = heads();
+    const graph = await load(before);
+    expect(graph?.compare(repo.head('feature/login'), repo.head('main'))).toMatchObject({
+      ahead: 1,
+      behind: 1,
+    });
+
+    repo.commit('four');
+    // GitHub moved, the sync has not run: the old file does not answer for the new heads.
+    expect(await load(heads())).toBeNull();
+    await treeSyncHandler({ event, step: createFakeRunner().step }, deps);
+    expect((await load(heads()))?.has(repo.head('main'))).toBe(true);
+    expect(await load(before)).toBeNull();
+    // Ids only next to the clone: the file never names a branch.
+    const file = readFileSync(path.join(cacheDir, `${REPO.githubRepoId}.graph`), 'latin1');
+    expect(file).not.toContain('feature/login');
+  });
+
+  it('a failed graph cache write never fails the sync', async () => {
+    deps.cache.saveGraph = async () => {
+      throw new Error('ENOSPC');
+    };
+    const result = await treeSyncHandler({ event, step: createFakeRunner().step }, deps);
+    expect(result.status).toBe('ready');
+    expect(log.warn).toHaveBeenCalledWith(
+      { repoId: REPO.id, reason: 'graph_cache_failed' },
+      expect.any(String),
+    );
   });
 
   it('step outputs hold only counts and flags (Inngest persists them)', async () => {
@@ -713,7 +750,7 @@ describe('planPrs', () => {
     state: 'open',
     headSha: 'a',
     baseRef: 'main',
-    baseSha: null,
+    baseSha: '0'.repeat(40),
     mergedAt: null,
     mergeCommitSha: null,
   };

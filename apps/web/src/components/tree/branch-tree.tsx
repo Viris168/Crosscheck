@@ -122,7 +122,7 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
           </Button>
         </Alert>
       )}
-      {data.snapshot && data.liveEvents === false && data.status !== 'syncing' && (
+      {data.snapshot && !data.liveEvents && data.status !== 'syncing' && (
         <p data-testid="live-hint" className="text-xs text-muted-foreground">
           No push events from GitHub yet, so this tree refreshes every 15 minutes, not live.{' '}
           <a

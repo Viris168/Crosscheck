@@ -10,8 +10,16 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { GitError, readCommitGraph, runGit, type RunGitOptions } from '@app/git-graph/git';
-import type { CommitInput } from '@app/git-graph';
+import type { CommitGraph, CommitInput } from '@app/git-graph';
+import {
+  GitError,
+  assertNoContents,
+  loadGraph,
+  readCommitGraph,
+  runGit,
+  saveGraph,
+  type RunGitOptions,
+} from '@app/git-graph/git';
 import { retriable } from './errors';
 import type { JobLogger } from './deps';
 
@@ -199,23 +207,41 @@ export async function readCloneGraph(
   );
 }
 
-/** Throws if the clone holds any tree or blob (i.e. file contents or names). */
-export async function assertNoContents(gitDir: string): Promise<void> {
-  const { stdout } = await runGit([
-    '--git-dir',
-    gitDir,
-    'cat-file',
-    '--batch-all-objects',
-    '--batch-check=%(objecttype)',
-  ]);
-  const counts: Record<string, number> = {};
-  for (const type of stdout.split('\n')) if (type) counts[type] = (counts[type] ?? 0) + 1;
-  const trees = counts.tree ?? 0;
-  const blobs = counts.blob ?? 0;
-  if (trees || blobs) {
-    throw new Error(`[internal] cache clone holds contents (${trees} trees, ${blobs} blobs)`);
-  }
+// --- graph cache (T6a): `<cacheDir>/<githubRepoId>.graph`, ids only, next to the clone ---
+
+/** Branch heads the graph was read for: name → head SHA. */
+export type GraphHeads = readonly { name: string; headSha: string }[];
+
+const graphId = (githubRepoId: number) => {
+  if (!Number.isSafeInteger(githubRepoId) || githubRepoId <= 0) throw new Error('invalid repo id');
+  return String(githubRepoId);
+};
+const refsOf = (heads: GraphHeads) =>
+  heads.map((h) => [`refs/heads/${h.name}`, h.headSha] as const);
+
+/**
+ * Store the graph the snapshot was built from. Keyed by the ref set: a refresh that moves, adds or
+ * deletes any branch writes a new file, and a reader with other heads ignores this one.
+ */
+export function saveCloneGraph(
+  repo: CacheRepo,
+  heads: GraphHeads,
+  graph: CommitGraph,
+  opts: { cacheDir: string },
+): Promise<void> {
+  return saveGraph(opts.cacheDir, graphId(repo.githubRepoId), graph, refsOf(heads));
 }
+
+/** The stored graph for exactly these heads, or null (none, unreadable, or for another ref set). */
+export function loadCloneGraph(
+  repo: CacheRepo,
+  heads: GraphHeads,
+  opts: { cacheDir: string },
+): Promise<CommitGraph | null> {
+  return loadGraph(opts.cacheDir, graphId(repo.githubRepoId), refsOf(heads));
+}
+
+export { assertNoContents };
 
 // --- internals ---
 
@@ -264,7 +290,7 @@ async function fetchClone(gitDir: string, auth: GitAuth, opts: RunGitOptions): P
 }
 
 /** Make origin a non-promisor remote so nothing is ever lazily fetched into the cache. */
-async function lockDown(gitDir: string): Promise<void> {
+export async function lockDown(gitDir: string): Promise<void> {
   await git(gitDir, ['config', 'remote.origin.promisor', 'false']);
   // exit 5 = key not set
   await runGit(['--git-dir', gitDir, 'config', '--unset-all', 'remote.origin.partialclonefilter'], {
