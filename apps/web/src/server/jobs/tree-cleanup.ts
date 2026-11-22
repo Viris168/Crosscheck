@@ -115,7 +115,10 @@ async function cleanLeftovers(deps: TreeCleanupDeps): Promise<number> {
   return removed;
 }
 
-/** When the clone was made: git writes `HEAD` at clone time and a fetch leaves it alone. 0 = unknown. */
+/**
+ * When the clone was made. 0 = unknown.
+ * VERIFY: git writes `HEAD` at clone time and `fetch` leaves it alone (seen on git 2.47, not documented).
+ */
 async function clonedAt(cacheDir: string, githubRepoId: number): Promise<number> {
   return (await mtime(path.join(cloneDir(cacheDir, githubRepoId), 'HEAD'))) ?? 0;
 }
