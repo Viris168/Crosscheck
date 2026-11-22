@@ -199,6 +199,7 @@ describe('GET /api/repos/:repoId/tree', () => {
       errorCode: null,
       snapshot: null,
       canEdit: false,
+      viewerLogin: null, // no snapshot yet, so no rows to filter: the login is not looked up
     });
 
     await getTree();
