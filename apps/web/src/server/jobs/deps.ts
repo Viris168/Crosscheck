@@ -23,6 +23,7 @@ import {
   ensureClone,
   readCloneGraph,
   redisRepoLock,
+  saveCloneGraph,
   withRepoLock,
   type GitAuth,
 } from './repo-cache';
@@ -177,6 +178,7 @@ export function realTreeSyncDeps(): TreeSyncDeps {
         }),
       readGraph: (repo, heads) =>
         readCloneGraph(repo, heads, { cacheDir, lock, lockWaitMs: TREE_LOCK_WAIT_MS }),
+      saveGraph: (repo, heads, graph) => saveCloneGraph(repo, heads, graph, { cacheDir }),
     },
     merged: redisTreeMerged(getRedis(), async (repo, auth, input) =>
       // Under the clone lock: the workspace is a `--shared` clone of the cache, so the cache must not be

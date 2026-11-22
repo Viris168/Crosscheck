@@ -1,6 +1,6 @@
 import 'server-only';
 import type { TreeSyncReason } from '@app/shared';
-import { inngest } from '@/server/jobs';
+import { requestTreeSync } from '@/server/jobs';
 import { logger } from '@/server/logger';
 import { getRedis } from '@/server/redis';
 
@@ -50,13 +50,12 @@ export async function requestInSlot(key: string, send: () => Promise<void>): Pro
 export const syncKey = (repoId: string) => `tree:sync:rl:${repoId}`;
 export const firstViewKey = (repoId: string) => `tree:first-view:${repoId}`;
 
-/** Ids only in the payload. */
-export async function requestTreeSync(
+/** Sends `tree/sync-requested` (ids only in the payload) and logs it. */
+export async function startTreeSync(
   repoId: string,
   orgId: string,
   reason: (typeof TreeSyncReason)[number],
 ) {
-  // TODO(T2c): switch to `requestTreeSync` from '@/server/jobs' once it is merged.
-  await inngest.send({ name: 'tree/sync-requested', data: { repoId, orgId, reason } });
+  await requestTreeSync(repoId, orgId, reason);
   logger.info({ repoId, reason }, 'tree sync requested');
 }

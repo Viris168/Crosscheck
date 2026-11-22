@@ -12,6 +12,7 @@ import { errorCodeOf, errorMessageOf, nonRetriable } from './errors';
 import {
   assertNoContents,
   cloneDir,
+  lockDown,
   withRepoLock,
   type CacheRepo,
   type GitAuth,
@@ -89,8 +90,10 @@ export interface TreeRefreshState {
   getCursor(repoId: string): Promise<RefreshCursor | null>;
   setCursor(repoId: string, cursor: RefreshCursor): Promise<void>;
   recordView(repoId: string, at: Date): Promise<void>;
-  /** repoIds viewed at or after `since` (older views are dropped). */
+  /** repoIds viewed at or after `since`. */
   viewedSince(since: Date): Promise<string[]>;
+  /** Forget views older than `before` (tree-cleanup; the cron and the cleanup read different windows). */
+  dropViewsBefore(before: Date): Promise<void>;
 }
 
 export interface TreeRefreshRefs {
@@ -532,14 +535,6 @@ export async function fetchCloneRefs(
   );
 }
 
-/** Mirrors repo-cache's `lockDown`: `fetch --filter` turns origin back into a promisor remote. */
-async function lockDown(gitDir: string): Promise<void> {
-  await runGit(['--git-dir', gitDir, 'config', 'remote.origin.promisor', 'false']);
-  await runGit(['--git-dir', gitDir, 'config', '--unset-all', 'remote.origin.partialclonefilter'], {
-    okExitCodes: [0, 5],
-  });
-}
-
 async function exists(p: string): Promise<boolean> {
   try {
     await stat(p);
@@ -680,8 +675,10 @@ export function redisTreeRefreshState(redis: RefreshRedis): TreeRefreshState {
       await redis.zadd(TREE_VIEWS_KEY, at.getTime(), repoId);
     },
     async viewedSince(since) {
-      await redis.zremrangebyscore(TREE_VIEWS_KEY, '-inf', `(${since.getTime()}`);
       return redis.zrangebyscore(TREE_VIEWS_KEY, since.getTime(), '+inf');
+    },
+    async dropViewsBefore(before) {
+      await redis.zremrangebyscore(TREE_VIEWS_KEY, '-inf', `(${before.getTime()}`);
     },
   };
 }

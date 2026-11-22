@@ -13,11 +13,9 @@ import { NOT_COMPUTED } from './scale-contract';
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 let big: TreeSnapshot;
-let minePrs: number[];
 beforeAll(() => {
   const repo = scaleRepo();
   big = scaleSnapshot(repo);
-  minePrs = repo.minePrs;
 });
 
 const body = (snapshot: TreeSnapshot) =>

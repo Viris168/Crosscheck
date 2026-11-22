@@ -44,7 +44,7 @@ vi.mock('@/server/auth', () => ({
 }));
 
 vi.mock('@/server/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock('@/server/jobs', () => ({ inngest: { send: vi.fn() } }));
+vi.mock('@/server/jobs', () => ({ requestTreeSync: vi.fn(), recordTreeView: vi.fn() }));
 
 const perm = vi.hoisted(() => ({ getRepoCollaborator: vi.fn(), getRepoPermission: vi.fn() }));
 vi.mock('@/server/github', async () => ({
@@ -116,8 +116,8 @@ beforeEach(() => {
     where.id === 'r1' ? repo : null,
   );
   db.user.findUnique.mockResolvedValue({ login: 'octo' });
-  db.branch.findMany.mockImplementation(async ({ where }: { where: { name: { in: string[] } } }) =>
-    where.name.in.filter((n) => heads.has(n)).map((name) => ({ name, headSha: heads.get(name)! })),
+  db.branch.findMany.mockImplementation(async () =>
+    [...heads].map(([name, headSha]) => ({ name, headSha })),
   );
   db.compareOverride.findMany.mockResolvedValue([]);
   db.gitEvent.findFirst.mockResolvedValue({ id: 'ev1' });
@@ -164,10 +164,10 @@ describe('GET /api/repos/:repoId/tree/compare', () => {
       mergeBase: g.mergeBase(SEED_SHA.f3!, heads.get('main')!),
     });
     expect(body.ahead).toBeGreaterThan(0);
-    // The graph is read for exactly these two heads.
+    // Asked for all live heads: together they name the graph the sync stored (T6a cache).
     expect(graphs.loadCommitGraph).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'r1', githubRepoId: 1 }),
-      [SEED_SHA.f3, heads.get('main')],
+      [...heads].map(([name, headSha]) => ({ name, headSha })),
     );
   });
 

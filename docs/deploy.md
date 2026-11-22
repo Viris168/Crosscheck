@@ -76,6 +76,20 @@ APP_ENV_FILE=/tmp/prod-local.env infra/scripts/compose.sh down -v     # -v also 
 ```
 Postgres and Redis publish no host ports, so they don't clash with a local dev stack on 5432/6379.
 
+GitHub can't reach `https://localhost`: relay the webhooks with smee, trusting Caddy's internal CA. This can
+run next to the dev relay (both stacks then get every event; leave the AI keys empty here if both know the
+same repo, or each PR is reviewed twice):
+```bash
+docker cp ai-review-caddy-1:/data/caddy/pki/authorities/local/root.crt /tmp/caddy-root.crt
+NODE_EXTRA_CA_CERTS=/tmp/caddy-root.crt npx smee-client -u https://smee.io/<your-channel> -t https://localhost/api/webhooks/github
+```
+Branch tree checks:
+```bash
+infra/scripts/compose.sh exec web git --version                        # >= 2.44
+infra/scripts/compose.sh exec web sh -c 'for d in "$REPO_CACHE_DIR"/*.git; do
+  git --git-dir "$d" cat-file --batch-all-objects --batch-check="%(objecttype)" | sort | uniq -c; done'   # commits only
+```
+
 ---
 
 ## 3. Later: deploy to a VPS
@@ -261,10 +275,13 @@ Postgres). To drop it (e.g. after moving servers or to free space):
   <!-- VERIFY: per-commit size estimate; measure on a real 50k-commit repo in T6a. -->
   Docker named volumes have no built-in size cap on the default `local` driver; if you need a hard cap,
   put `/var/lib/docker/volumes/ai-review_repo-cache` on its own small filesystem (or LVM volume).
-- **Cleanup:** a clone whose repo was removed from the platform (App uninstalled, repo deselected) is
-  never read again. Delete it by hand when it matters:
-  `compose.sh exec web sh -c 'ls -la "$REPO_CACHE_DIR"'`, then `rm -rf "$REPO_CACHE_DIR/<githubRepoId>.git"`.
-  Deleting a clone of an active repo is also safe; it just makes the next sync a full clone.
+- **Contents:** next to each clone, `<githubRepoId>.graph` is the commit graph the last sync built (SHAs,
+  parents, times; no names). The API reads it instead of running `git log`; a file for other branch heads is
+  ignored, so it can be deleted at any time.
+- **Cleanup:** the `tree-cleanup` job (daily, 04:17 UTC) deletes clones nobody viewed in 30 days or whose repo
+  was removed from the installation, half-made clones, and content workspaces older than 1 h. Deleting a
+  clone by hand (`compose.sh exec web sh -c 'rm -rf "$REPO_CACHE_DIR/<githubRepoId>.git"'`) is always safe; it
+  just makes the next sync a full clone.
 
 `infra/scripts/backup.sh` (cron 03:15 UTC, logs to `/opt/app/backups/backup.log`) dumps **both** databases
 (`app`, `inngest`) with `pg_dump` → gzip into `/opt/app/backups/daily/`, copies Sunday's to `weekly/`, and

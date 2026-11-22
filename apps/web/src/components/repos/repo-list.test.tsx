@@ -18,6 +18,25 @@ function reposResponse(body: unknown) {
 
 const INSTALL = 'https://github.com/apps/x/installations/new';
 
+const REPO = {
+  id: 'r1',
+  orgId: 'org1',
+  fullName: 'acme/web',
+  provider: 'platform',
+  active: true,
+  hasIngestToken: false,
+  lastReview: null,
+};
+
+describe('RepoList rows', () => {
+  it('links each repo to its branch tree', async () => {
+    reposResponse([REPO]);
+    renderWithQuery(<RepoList />);
+    const link = await screen.findByRole('link', { name: 'Branches of acme/web' });
+    expect(link.getAttribute('href')).toBe('/repos/r1/tree');
+  });
+});
+
 describe('RepoList empty state', () => {
   it('owner/admin: offers to install the GitHub App', async () => {
     reposResponse([]);

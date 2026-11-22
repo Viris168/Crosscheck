@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { functions, inngest, requestTreeSync } from './index';
+
+const redis = vi.hoisted(() => ({ zadd: vi.fn(async () => 1) }));
+vi.mock('@/server/redis', () => ({ getRedis: () => redis }));
+
+import { functions, inngest, recordTreeView, requestTreeSync } from './index';
 
 describe('@/server/jobs', () => {
   it('exports the Inngest client with the app id', () => {
@@ -17,6 +21,7 @@ describe('@/server/jobs', () => {
       'tree-sync',
       'tree-refresh',
       'tree-cron',
+      'tree-cleanup',
     ]);
   });
 
@@ -28,8 +33,17 @@ describe('@/server/jobs', () => {
           appPrefix: 'ai-review',
         })[0],
     );
-    const [start, finalize, sweep, memberSync, memberPrune, treeSync, treeRefresh, treeCron] =
-      configs;
+    const [
+      start,
+      finalize,
+      sweep,
+      memberSync,
+      memberPrune,
+      treeSync,
+      treeRefresh,
+      treeCron,
+      treeCleanup,
+    ] = configs;
     expect(start?.triggers).toEqual([{ event: 'review/requested' }]);
     expect(start?.concurrency).toEqual({ key: 'event.data.orgId', limit: 3 });
     expect(finalize?.triggers).toEqual([{ event: 'review/finalize' }]);
@@ -51,6 +65,7 @@ describe('@/server/jobs', () => {
     });
     expect(treeRefresh?.concurrency).toEqual({ key: 'event.data.repoId', limit: 1 });
     expect(treeCron?.triggers).toEqual([{ cron: '*/15 * * * *' }]);
+    expect(treeCleanup?.triggers).toEqual([{ cron: '17 4 * * *' }]);
     expect(start?.steps?.step?.retries).toEqual({ attempts: 2 }); // = retries (2 retries after the first try);
   });
 });
@@ -64,6 +79,16 @@ describe('requestTreeSync', () => {
       data: { repoId: 'repo_1', orgId: 'org_1', reason: 'first_view' },
     });
     send.mockRestore();
+  });
+});
+
+describe('recordTreeView', () => {
+  it('stores the view time, and never throws when Redis is down', async () => {
+    const at = new Date('2026-11-22T10:00:00Z');
+    await recordTreeView('repo_1', at);
+    expect(redis.zadd).toHaveBeenCalledWith('tree:views', at.getTime(), 'repo_1');
+    redis.zadd.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    await expect(recordTreeView('repo_1')).resolves.toBeUndefined();
   });
 });
 

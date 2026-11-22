@@ -6,7 +6,14 @@ import { FixtureRepo } from '@app/git-graph/testing';
 import { TreeSnapshotSchema, type CiState, type ErrorCode, type TreeSnapshot } from '@app/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeRunner } from './__fixtures__/fake-step';
-import { cloneDir, ensureClone, readCloneGraph, type GitAuth, type RepoLock } from './repo-cache';
+import {
+  cloneDir,
+  ensureClone,
+  readCloneGraph,
+  saveCloneGraph,
+  type GitAuth,
+  type RepoLock,
+} from './repo-cache';
 import {
   REFRESH_MAX_EVENTS,
   TREE_VIEWS_KEY,
@@ -187,6 +194,9 @@ function memoryState(): TreeRefreshState & { cursors: Map<string, RefreshCursor>
     },
     viewedSince: async (since) =>
       [...views].filter(([, t]) => t >= since.getTime()).map(([id]) => id),
+    async dropViewsBefore(before) {
+      for (const [id, t] of views) if (t < before.getTime()) views.delete(id);
+    },
   };
 }
 
@@ -316,6 +326,7 @@ describe('tree-refresh against a local fixture repo', () => {
             return ensureClone(r, a, { cacheDir, lock, assertNoContents: true });
           },
           readGraph: (r, heads) => readCloneGraph(r, heads, { cacheDir, lock }),
+          saveGraph: (r, heads, graph) => saveCloneGraph(r, heads, graph, { cacheDir }),
         },
         merged: {
           detect: async () => new Map(),
@@ -502,7 +513,7 @@ describe('tree-refresh against a local fixture repo', () => {
         headRef: 'feat-b',
         headSha: repo.head('feat-b'),
         baseRef: 'feat-a',
-        baseSha: null,
+        baseSha: '0'.repeat(40),
         mergedAt: null,
         mergeCommitSha: null,
         title: 't',
@@ -813,12 +824,15 @@ describe('redisTreeRefreshState', () => {
     expect(await s.getCursor('r')).toBeNull();
   });
 
-  it('keeps views in one sorted set and drops old ones', async () => {
+  it('keeps views in one sorted set; reading a window drops nothing, dropViewsBefore does', async () => {
     const redis = fakeRedis();
     const s = redisTreeRefreshState(redis);
     await s.recordView('old', new Date(1000));
     await s.recordView('new', new Date(5000));
+    // tree-cron reads 7 days, tree-cleanup 30: the shorter read must not lose the longer window.
     expect(await s.viewedSince(new Date(2000))).toEqual(['new']);
+    expect([...redis.z.keys()]).toEqual(['old', 'new']);
+    await s.dropViewsBefore(new Date(2000));
     expect([...redis.z.keys()]).toEqual(['new']);
     expect(TREE_VIEWS_KEY).toBe('tree:views');
   });

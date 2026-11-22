@@ -1,4 +1,5 @@
 // Inngest function definitions. Handlers live in review-*.ts and take their dependencies explicitly.
+import { sweepStaleWorkspaces } from '@app/git-graph/git';
 import { LIMITS, REVIEW_SWEEP_CRON } from '@app/shared';
 import { pruneRemovedMembers, syncUserMemberships } from '@/server/github';
 import { env } from '@/server/env';
@@ -12,6 +13,7 @@ import { reviewFinalizeHandler } from './review-finalize';
 import { reviewStartHandler } from './review-start';
 import { reviewSweepHandler } from './review-sweep';
 import { redisRepoLock } from './repo-cache';
+import { TREE_CLEANUP_CRON, prismaActiveRepos, treeCleanupHandler } from './tree-cleanup';
 import {
   TREE_CRON,
   fetchCloneRefs,
@@ -162,6 +164,31 @@ export const treeCron = inngest.createFunction(
     return treeCronHandler(
       { step: step as unknown as TreeRefreshStep },
       { store: d.store, state: d.state, now: () => new Date(), log: logger },
+    );
+  },
+);
+
+/**
+ * Daily: delete clones of repos not viewed in 30 days or removed from the installation, and leftovers of
+ * crashed processes (T7). One run at a time.
+ */
+export const treeCleanup = inngest.createFunction(
+  { id: 'tree-cleanup', retries: 2, concurrency: { limit: 1 } },
+  { cron: TREE_CLEANUP_CRON },
+  ({ step }) => {
+    const { state } = getRefreshDeps();
+    return treeCleanupHandler(
+      { step: step as unknown as TreeSyncStep },
+      {
+        cacheDir: env.REPO_CACHE_DIR,
+        lock: redisRepoLock(getRedis()),
+        activeRepos: prismaActiveRepos,
+        viewedSince: state.viewedSince,
+        dropViewsBefore: state.dropViewsBefore,
+        sweepWorkspaces: (maxAgeMs) => sweepStaleWorkspaces(maxAgeMs),
+        now: () => new Date(),
+        log: logger,
+      },
     );
   },
 );
