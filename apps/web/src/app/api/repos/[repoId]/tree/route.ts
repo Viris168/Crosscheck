@@ -107,6 +107,9 @@ async function viewerLogin(userId: string): Promise<string | null> {
  * The page polls it every 3 s with `If-None-Match`; an unchanged tree answers 304 with no body (T5c).
  * `?visible=a&visible=b` (T6b): the rows on screen; their counts are computed if the snapshot lacks them.
  */
+/** `GitEvent.kind`s that only arrive when the GitHub App is subscribed to Push (the `liveEvents` flag). */
+const PUSH_EVENT_KINDS = ['push', 'branch_created', 'branch_deleted', 'force_push'] as const;
+
 export const GET = route<{ repoId: string }>(async (req, params) => {
   const session = await requireSession(req);
   const { repoId } = TreeParams.parse(params);
@@ -147,7 +150,12 @@ export const GET = route<{ repoId: string }>(async (req, params) => {
 
   const [overrides, gitEvent] = await Promise.all([
     loadOverrides(repoId),
-    prisma.gitEvent.findFirst({ where: { repoId }, select: { id: true } }),
+    // Push kinds only: GitHub sends check_suite (and the review path pull_request) without a Push
+    // subscription, so those events don't mean pushes arrive.
+    prisma.gitEvent.findFirst({
+      where: { repoId, kind: { in: [...PUSH_EVENT_KINDS] } },
+      select: { id: true },
+    }),
   ]);
   const liveEvents = gitEvent !== null;
   const etag = etagForVisible(

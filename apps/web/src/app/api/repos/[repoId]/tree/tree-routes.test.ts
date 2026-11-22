@@ -336,7 +336,11 @@ describe('GET /tree conditional requests (T5c)', () => {
     expect(none.status).toBe(200);
     expect(GetTreeResponse.parse(await none.json()).liveEvents).toBe(false);
     expect(db.gitEvent.findFirst).toHaveBeenCalledWith({
-      where: { repoId: 'r1' },
+      // check_suite / pull_request events arrive without a Push subscription: they don't count
+      where: {
+        repoId: 'r1',
+        kind: { in: ['push', 'branch_created', 'branch_deleted', 'force_push'] },
+      },
       select: { id: true },
     });
   });
