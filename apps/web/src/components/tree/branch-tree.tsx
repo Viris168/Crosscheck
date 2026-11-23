@@ -372,18 +372,13 @@ function useTreeDirection(): [TreeDirection, (d: TreeDirection) => void] {
 
 /**
  * Full-screen toggle for the tree (like a video player): the browser's full screen when it allows it,
- * else the panel covers the window. Esc leaves either one.
+ * with the panel also covering the window. Leaving the browser's full screen (Esc, or a browser that
+ * drops it on its own, as some Chrome setups do on a click) keeps the window-filling panel; the button
+ * or a second Esc closes it.
  */
 function useFullScreen<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [full, setFull] = useState(false);
-  useEffect(() => {
-    const onChange = () => {
-      if (!document.fullscreenElement) setFull(false);
-    };
-    document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
   useEffect(() => {
     if (!full) return;
     const onKey = (e: KeyboardEvent) => {

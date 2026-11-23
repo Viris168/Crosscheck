@@ -189,6 +189,17 @@ describe('Full screen', () => {
     await userEvent.keyboard('{Escape}');
     expect(screenEl.hasAttribute('data-full')).toBe(false);
   });
+
+  it('stays filling the window when the browser drops its own full screen', async () => {
+    serve(tree());
+    render();
+    await screen.findByRole('group', { name: /Repository tree/ });
+    await userEvent.click(screen.getByRole('button', { name: 'Full screen' }));
+    document.dispatchEvent(new Event('fullscreenchange')); // e.g. Chrome leaving it on a click
+    expect(screen.getByTestId('tree-screen').hasAttribute('data-full')).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Exit full screen' }));
+    expect(screen.getByTestId('tree-screen').hasAttribute('data-full')).toBe(false);
+  });
 });
 
 describe('Direction', () => {
