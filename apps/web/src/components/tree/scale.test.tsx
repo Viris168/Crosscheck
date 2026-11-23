@@ -128,12 +128,12 @@ describe('collapse', () => {
     expect(document.querySelector('[data-branch="feature/login"]')).toBeTruthy();
   });
 
-  it('a long run shows "… N commits" and expands to every drawn commit', async () => {
+  it('a long run shows "Show N commits" and expands to every drawn commit', async () => {
     const snap: TreeSnapshot = { ...big, branches: big.branches.slice(0, 1) }; // main only: 30 drawn
     serve(snap);
     render();
     const chip = await screen.findByRole('button', { name: /^Show \d+ older commits on main$/ });
-    expect(within(chip).getByText(/^… \d+ commits$/)).toBeTruthy();
+    expect(within(chip).getByText(/^Show \d+ commits ▸$/)).toBeTruthy();
     const before = document.querySelectorAll('[data-shape]').length;
     await userEvent.click(chip);
     const after = document.querySelectorAll('[data-shape]').length;

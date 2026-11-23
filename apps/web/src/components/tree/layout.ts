@@ -5,7 +5,7 @@ import type { BranchNode, PullRequestState, TreeSnapshot } from '@app/shared/cli
 import { isComputed } from './scale-contract';
 import type { ViewRow } from './view';
 
-export const MAX_SHOWN = 7;
+export const MAX_SHOWN = 1;
 export const METHOD = { merge: 'merge commit', squash: 'squash', rebase: 'rebase' } as const;
 
 // Geometry from the prototype's renderTree().
@@ -294,15 +294,15 @@ export type TreeLayout = {
 /** Row index range [start, end) whose commits are laid out and drawn. */
 export type RowRange = { start: number; end: number };
 
-/** Chip text: "… 120 commits" folded, "hide" when the run is expanded. */
+/** Chip text: "Show 120 commits ▸" folded, "◂ Hide" when the run is expanded. */
 export const moreLabel = (it: { count: number; expanded: boolean }) =>
-  it.expanded ? 'hide' : `… ${it.count} commit${it.count === 1 ? '' : 's'}`;
+  it.expanded ? '◂ Hide' : `Show ${it.count} commit${it.count === 1 ? '' : 's'} ▸`;
 /** Approximate chip width for its label (12px text). */
 export const chipWidth = (label: string) => Math.max(36, Math.round(label.length * 6.8 + 18));
 
 export const rowY = (i: number) => G.TOP + 26 + i * G.RH;
 
-/** Width of a row with a wide "… N commits" chip and MAX_SHOWN commits (see `layoutTree`). */
+/** Width of a row with a wide "Show N commits" chip and MAX_SHOWN commits (see `layoutTree`). */
 export const fullRowWidth = () =>
   G.CX -
   18 +

@@ -50,7 +50,10 @@ describe('branchOrder (prototype)', () => {
 describe('layoutTree', () => {
   it("draws each branch's own commits: ahead of its compare-with branch", () => {
     const s = seedSnapshot();
-    const rows = rowsOf(s);
+    const expanded = new Set(s.branches.map((b) => b.name));
+    const rows = layoutTree(s, new TreeGraph(s.commits), undefined, { expanded }).rows.filter(
+      (r): r is BranchRow => r.kind === 'branch',
+    );
     const shas = (name: string) =>
       rows
         .find((r) => r.branch.name === name)!
@@ -61,7 +64,7 @@ describe('layoutTree', () => {
     expect(shas('main')).toEqual([SEED_SHA.c1, SEED_SHA.c2, SEED_SHA.c3, SEED_SHA.c4]);
   });
 
-  it('marks the head and folds older commits into a "… N commits" chip', () => {
+  it('marks the head and folds older commits into a "Show N commits" chip', () => {
     const commits = Array.from({ length: 10 }, (_, i) => ({
       sha: String(i).repeat(40),
       parents: i ? [String(i - 1).repeat(40)] : [],
@@ -82,7 +85,7 @@ describe('layoutTree', () => {
       branches: seedBranches.map((b) => (b.name === 'dev' ? { ...b, ahead: 40 } : b)),
     });
     const row = rowsOf(s).find((r) => r.branch.name === 'dev')!;
-    expect(row.items[0]).toMatchObject({ kind: 'more', count: 38 });
+    expect(row.items[0]).toMatchObject({ kind: 'more', count: 40 - MAX_SHOWN });
   });
 
   it('flags merge commits (2+ parents)', () => {

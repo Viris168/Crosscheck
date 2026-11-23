@@ -40,6 +40,9 @@ const NOTE_COLOR = { ok: 'var(--t-ok)', warn: 'var(--t-warn)', muted: 'var(--mut
 // Keyframes without an end state animate back to the element's own fill/stroke.
 const FOCUS_CSS = `.bt-node{cursor:pointer;outline:none}
 .bt-node:focus-visible>.bt-shape{stroke:var(--t-accent);stroke-width:3}
+.bt-run>.bt-shape{fill:var(--t-accent-bg);stroke:var(--t-accent)}
+.bt-run:hover>.bt-shape{stroke-width:2}
+.bt-run>text{fill:var(--t-accent);font-weight:600}
 @keyframes bt-flash{from,35%{fill:var(--t-warn-bg);stroke:var(--t-warn)}}
 @keyframes bt-enter{from{opacity:0;transform:translateX(-24px)}}
 @keyframes bt-fade-in{from{opacity:0}}
@@ -480,6 +483,7 @@ function BranchRowView({
               {link}
               <g
                 {...nodeProps({ type: 'branch', name: b.name }, aria, toggle)}
+                className={it.expandable ? 'bt-node bt-run' : 'bt-node'}
                 aria-expanded={it.expandable ? it.expanded : undefined}
                 data-run={it.expanded ? 'expanded' : 'collapsed'}
               >
