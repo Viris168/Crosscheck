@@ -173,6 +173,24 @@ describe('BranchTree with the seed snapshot', () => {
   });
 });
 
+describe('Full screen', () => {
+  it('the button fills the window with the tree; the button or Esc brings it back', async () => {
+    serve(tree());
+    render();
+    await screen.findByRole('group', { name: /Repository tree/ });
+    const screenEl = screen.getByTestId('tree-screen');
+    expect(screenEl.hasAttribute('data-full')).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: 'Full screen' }));
+    expect(screenEl.hasAttribute('data-full')).toBe(true);
+    expect(screen.getByTestId('tree-scroller').style.maxHeight).toBe('');
+    await userEvent.click(screen.getByRole('button', { name: 'Exit full screen' }));
+    expect(screenEl.hasAttribute('data-full')).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: 'Full screen' }));
+    await userEvent.keyboard('{Escape}');
+    expect(screenEl.hasAttribute('data-full')).toBe(false);
+  });
+});
+
 describe('BranchTree states', () => {
   it('syncing without a snapshot: skeleton + "Cloning commits…"', async () => {
     serve(tree({ status: 'syncing', syncedAt: null }, null));

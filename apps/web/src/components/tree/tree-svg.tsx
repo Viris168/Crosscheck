@@ -83,9 +83,12 @@ export type Viewport = { top: number; height: number };
  */
 export function VirtualTree({
   count,
+  fill = false,
   children,
 }: {
   count: number;
+  /** grow to the parent's height (full screen) instead of stopping at VIEWPORT_MAX_H */
+  fill?: boolean;
   children: (range: RowRange, viewport: Viewport) => ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -113,8 +116,8 @@ export function VirtualTree({
     <div
       ref={ref}
       data-testid="tree-scroller"
-      className="overflow-auto"
-      style={{ maxHeight: VIEWPORT_MAX_H }}
+      className={fill ? 'min-h-0 flex-1 overflow-auto' : 'overflow-auto'}
+      style={fill ? undefined : { maxHeight: VIEWPORT_MAX_H }}
     >
       {children({ start, end }, viewport)}
     </div>
