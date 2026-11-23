@@ -1,12 +1,19 @@
 'use client';
 
 import type { ErrorCode } from '@app/shared/client';
-import { RefreshCw } from 'lucide-react';
+import {
+  ArrowDownFromLine,
+  ArrowRightFromLine,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentProps,
   type CSSProperties,
@@ -27,6 +34,7 @@ import {
   VirtualTree,
   type SelectOptions,
   type Selection,
+  type TreeDirection,
   type Viewport,
 } from './tree-svg';
 import { TreeToolbar } from './tree-toolbar';
@@ -73,7 +81,7 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
         ? 'Could not start a refresh. Try again.'
         : null;
 
-  const header = (data?: TreeData) => (
+  const header = (data?: TreeData, actions?: ReactNode) => (
     <div className="mb-3 flex flex-wrap items-center gap-3">
       <h2 className="mr-auto text-[15px] font-semibold">Repository tree</h2>
       {data?.status === 'syncing' && data.snapshot && (
@@ -90,6 +98,7 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
       >
         <RefreshCw aria-hidden /> Refresh
       </Button>
+      {actions}
     </div>
   );
 
@@ -140,7 +149,7 @@ export function BranchTree({ repoId, repoFullName }: { repoId: string; repoFullN
         <TreeBody
           data={data}
           snapshot={data.snapshot}
-          header={header(data)}
+          header={(actions) => header(data, actions)}
           repoId={repoId}
           repoFullName={repoFullName}
           onVisible={setVisible}
@@ -171,12 +180,15 @@ function TreeBody({
 }: {
   data: TreeData;
   snapshot: NonNullable<TreeData['snapshot']>;
-  header: ReactNode;
+  header: (actions: ReactNode) => ReactNode;
   repoId: string;
   repoFullName: string;
   onVisible: (names: readonly string[]) => void;
 }) {
   const router = useRouter();
+  const { ref: screenRef, full, toggle: toggleFull } = useFullScreen<HTMLDivElement>();
+  const [direction, setDirection] = useTreeDirection();
+  const vertical = direction === 'vertical';
   const [selection, setSelection] = useState<Selection>({ type: 'repo' });
   const [view, setView] = useTreeView();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -230,16 +242,48 @@ function TreeBody({
   };
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="flex min-w-0 flex-col gap-4">
+    <div
+      ref={screenRef}
+      data-testid="tree-screen"
+      data-full={full || undefined}
+      className={cn(
+        'grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]',
+        full &&
+          'fixed inset-0 z-50 h-dvh grid-rows-[minmax(0,1fr)] overflow-auto bg-background p-4 lg:overflow-hidden',
+      )}
+    >
+      <div className={cn('flex min-w-0 flex-col gap-4', full && 'min-h-0')}>
         {snapshot.truncated && (
           <Alert tone="warning">
             This repository is large, so only part of its history is drawn. Counts (↑ ahead, ↓
             behind) are still exact.
           </Alert>
         )}
-        <Card>
-          {header}
+        <Card className={full ? 'flex min-h-[70dvh] flex-col lg:min-h-0 lg:flex-1' : ''}>
+          {header(
+            <>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8"
+                onClick={() => setDirection(vertical ? 'horizontal' : 'vertical')}
+                aria-label={vertical ? 'Show left to right' : 'Show top to bottom'}
+                title={vertical ? 'Left to right' : 'Top to bottom'}
+              >
+                {vertical ? <ArrowRightFromLine aria-hidden /> : <ArrowDownFromLine aria-hidden />}
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8"
+                onClick={toggleFull}
+                aria-label={full ? 'Exit full screen' : 'Full screen'}
+                title={full ? 'Exit full screen (Esc)' : 'Full screen'}
+              >
+                {full ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}
+              </Button>
+            </>,
+          )}
           {snapshot.branches.length > 1 && (
             <TreeToolbar
               view={view}
@@ -258,7 +302,7 @@ function TreeBody({
               No branches match. Try another name or fewer filters.
             </p>
           ) : (
-            <VirtualTree count={rows.length}>
+            <VirtualTree key={direction} count={rows.length} fill={full} direction={direction}>
               {(r, viewport) => (
                 <TreeLayer
                   snapshot={snapshot}
@@ -277,6 +321,7 @@ function TreeBody({
                   onToggleMerged={(p) => setMergedOpen((m) => toggled(m, p))}
                   onToggleRun={(n) => setRuns((x) => toggled(x, n))}
                   changes={changes}
+                  direction={direction}
                 />
               )}
             </VirtualTree>
@@ -284,7 +329,7 @@ function TreeBody({
           <Legend />
         </Card>
       </div>
-      <aside>
+      <aside className={full ? 'lg:min-h-0 lg:overflow-auto' : undefined}>
         <Card aria-live="polite">
           <TreeDetails
             snapshot={snapshot}
@@ -300,6 +345,59 @@ function TreeBody({
       </aside>
     </div>
   );
+}
+
+const DIRECTION_KEY = 'tree-direction';
+
+/** Left to right (default) or top to bottom; remembered in this browser only. */
+function useTreeDirection(): [TreeDirection, (d: TreeDirection) => void] {
+  // TreeBody only mounts in the browser (after the tree query), so reading storage here is safe.
+  const [direction, setState] = useState<TreeDirection>(() => {
+    try {
+      return window.localStorage.getItem(DIRECTION_KEY) === 'vertical' ? 'vertical' : 'horizontal';
+    } catch {
+      return 'horizontal'; // storage blocked (private window)
+    }
+  });
+  const set = useCallback((d: TreeDirection) => {
+    setState(d);
+    try {
+      window.localStorage.setItem(DIRECTION_KEY, d);
+    } catch {
+      // not remembered; still switches for this visit
+    }
+  }, []);
+  return [direction, set];
+}
+
+/**
+ * Full-screen toggle for the tree (like a video player): the browser's full screen when it allows it,
+ * with the panel also covering the window. Leaving the browser's full screen (Esc, or a browser that
+ * drops it on its own, as some Chrome setups do on a click) keeps the window-filling panel; the button
+ * or a second Esc closes it.
+ */
+function useFullScreen<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.fullscreenElement) setFull(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [full]);
+  const toggle = useCallback(() => {
+    if (full) {
+      setFull(false);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+      return;
+    }
+    setFull(true);
+    // Not supported or refused (iframes, iOS Safari): the fixed overlay still fills the window.
+    void ref.current?.requestFullscreen?.().catch(() => {});
+  }, [full]);
+  return { ref, full, toggle };
 }
 
 /** Lays out only the rows in `range` (their commits are the costly part) and draws them. */

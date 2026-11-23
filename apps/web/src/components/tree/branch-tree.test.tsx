@@ -173,6 +173,56 @@ describe('BranchTree with the seed snapshot', () => {
   });
 });
 
+describe('Full screen', () => {
+  it('the button fills the window with the tree; the button or Esc brings it back', async () => {
+    serve(tree());
+    render();
+    await screen.findByRole('group', { name: /Repository tree/ });
+    const screenEl = screen.getByTestId('tree-screen');
+    expect(screenEl.hasAttribute('data-full')).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: 'Full screen' }));
+    expect(screenEl.hasAttribute('data-full')).toBe(true);
+    expect(screen.getByTestId('tree-scroller').style.maxHeight).toBe('');
+    await userEvent.click(screen.getByRole('button', { name: 'Exit full screen' }));
+    expect(screenEl.hasAttribute('data-full')).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: 'Full screen' }));
+    await userEvent.keyboard('{Escape}');
+    expect(screenEl.hasAttribute('data-full')).toBe(false);
+  });
+
+  it('stays filling the window when the browser drops its own full screen', async () => {
+    serve(tree());
+    render();
+    await screen.findByRole('group', { name: /Repository tree/ });
+    await userEvent.click(screen.getByRole('button', { name: 'Full screen' }));
+    document.dispatchEvent(new Event('fullscreenchange')); // e.g. Chrome leaving it on a click
+    expect(screen.getByTestId('tree-screen').hasAttribute('data-full')).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Exit full screen' }));
+    expect(screen.getByTestId('tree-screen').hasAttribute('data-full')).toBe(false);
+  });
+});
+
+describe('Direction', () => {
+  afterEach(() => window.localStorage.clear());
+
+  it('switches to top to bottom (branch columns) and back, and remembers the choice', async () => {
+    serve(tree());
+    render();
+    await screen.findByRole('group', { name: /Repository tree/ });
+    expect(branchRow('dev').getAttribute('transform')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Show top to bottom' }));
+    expect(branchRow('dev').getAttribute('transform')).toMatch(/^translate\(/);
+    expect(window.localStorage.getItem('tree-direction')).toBe('vertical');
+    cleanup();
+    render();
+    await screen.findByRole('group', { name: /Repository tree/ });
+    expect(screen.getByRole('button', { name: 'Show left to right' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Show left to right' }));
+    expect(branchRow('dev').getAttribute('transform')).toBeNull();
+    expect(window.localStorage.getItem('tree-direction')).toBe('horizontal');
+  });
+});
+
 describe('BranchTree states', () => {
   it('syncing without a snapshot: skeleton + "Cloning commits…"', async () => {
     serve(tree({ status: 'syncing', syncedAt: null }, null));

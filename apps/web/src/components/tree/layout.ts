@@ -5,7 +5,7 @@ import type { BranchNode, PullRequestState, TreeSnapshot } from '@app/shared/cli
 import { isComputed } from './scale-contract';
 import type { ViewRow } from './view';
 
-export const MAX_SHOWN = 7;
+export const MAX_SHOWN = 1;
 export const METHOD = { merge: 'merge commit', squash: 'squash', rebase: 'rebase' } as const;
 
 // Geometry from the prototype's renderTree().
@@ -289,20 +289,22 @@ export type TreeLayout = {
   rows: Row[];
   /** every branch in the snapshot (the repo node's label), not only the rows shown */
   branchCount: number;
+  /** most items in one row, counting expanded rows outside the range (a vertical tree's height) */
+  maxItems: number;
 };
 
 /** Row index range [start, end) whose commits are laid out and drawn. */
 export type RowRange = { start: number; end: number };
 
-/** Chip text: "… 120 commits" folded, "hide" when the run is expanded. */
+/** Chip text: "Show 120 commits ▸" folded, "◂ Hide" when the run is expanded. */
 export const moreLabel = (it: { count: number; expanded: boolean }) =>
-  it.expanded ? 'hide' : `… ${it.count} commit${it.count === 1 ? '' : 's'}`;
+  it.expanded ? '◂ Hide' : `Show ${it.count} commit${it.count === 1 ? '' : 's'} ▸`;
 /** Approximate chip width for its label (12px text). */
 export const chipWidth = (label: string) => Math.max(36, Math.round(label.length * 6.8 + 18));
 
 export const rowY = (i: number) => G.TOP + 26 + i * G.RH;
 
-/** Width of a row with a wide "… N commits" chip and MAX_SHOWN commits (see `layoutTree`). */
+/** Width of a row with a wide "Show N commits" chip and MAX_SHOWN commits (see `layoutTree`). */
 export const fullRowWidth = () =>
   G.CX -
   18 +
@@ -394,15 +396,20 @@ export function layoutTree(
   const byName = new Map(snapshot.branches.map((b) => [b.name, b]));
   const range = opts.range ?? { start: 0, end: view.length };
   let right = G.CX;
+  let maxItems = 0;
 
   const rows: Row[] = view.map((r, i): Row => {
     const y = rowY(i);
     if (r.kind === 'merged') return { ...r, y };
     const inRange = i >= range.start && i < range.end;
-    const items = inRange
-      ? rowItems(graph, r.branch, byName, squashShas, opts.expanded?.has(r.branch.name) ?? false)
-      : [];
-    right = Math.max(right, rowRight(items));
+    const expanded = opts.expanded?.has(r.branch.name) ?? false;
+    const items = inRange ? rowItems(graph, r.branch, byName, squashShas, expanded) : [];
+    // An expanded row keeps the canvas its size after it scrolls out of range; otherwise the
+    // scroller would shrink and jump back while the user is reading that row.
+    const sized =
+      !inRange && expanded ? rowItems(graph, r.branch, byName, squashShas, true) : items;
+    right = Math.max(right, rowRight(sized));
+    maxItems = Math.max(maxItems, sized.length);
     return {
       ...r,
       y,
@@ -420,6 +427,7 @@ export function layoutTree(
     repoY: (rowY(0) + rowY(last)) / 2,
     rows,
     branchCount: snapshot.branches.length,
+    maxItems,
   };
 }
 
