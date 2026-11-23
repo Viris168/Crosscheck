@@ -289,6 +289,8 @@ export type TreeLayout = {
   rows: Row[];
   /** every branch in the snapshot (the repo node's label), not only the rows shown */
   branchCount: number;
+  /** most items in one row, counting expanded rows outside the range (a vertical tree's height) */
+  maxItems: number;
 };
 
 /** Row index range [start, end) whose commits are laid out and drawn. */
@@ -394,15 +396,20 @@ export function layoutTree(
   const byName = new Map(snapshot.branches.map((b) => [b.name, b]));
   const range = opts.range ?? { start: 0, end: view.length };
   let right = G.CX;
+  let maxItems = 0;
 
   const rows: Row[] = view.map((r, i): Row => {
     const y = rowY(i);
     if (r.kind === 'merged') return { ...r, y };
     const inRange = i >= range.start && i < range.end;
-    const items = inRange
-      ? rowItems(graph, r.branch, byName, squashShas, opts.expanded?.has(r.branch.name) ?? false)
-      : [];
-    right = Math.max(right, rowRight(items));
+    const expanded = opts.expanded?.has(r.branch.name) ?? false;
+    const items = inRange ? rowItems(graph, r.branch, byName, squashShas, expanded) : [];
+    // An expanded row keeps the canvas its size after it scrolls out of range; otherwise the
+    // scroller would shrink and jump back while the user is reading that row.
+    const sized =
+      !inRange && expanded ? rowItems(graph, r.branch, byName, squashShas, true) : items;
+    right = Math.max(right, rowRight(sized));
+    maxItems = Math.max(maxItems, sized.length);
     return {
       ...r,
       y,
@@ -420,6 +427,7 @@ export function layoutTree(
     repoY: (rowY(0) + rowY(last)) / 2,
     rows,
     branchCount: snapshot.branches.length,
+    maxItems,
   };
 }
 

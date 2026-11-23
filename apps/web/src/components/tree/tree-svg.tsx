@@ -194,9 +194,8 @@ export function TreeSvg({
   const { rows } = layout;
   const { start, end } = range ?? { start: 0, end: rows.length };
   const shown = rows.slice(start, end);
-  const longest = Math.max(0, ...shown.map((r) => (r.kind === 'branch' ? r.items.length : 0)));
   const W = vertical ? colX(rows.length - 1) + V.COL / 2 + V.LEFT : (width ?? layout.width);
-  const H = vertical ? verticalHeight(longest) : layout.height;
+  const H = vertical ? verticalHeight(layout.maxItems) : layout.height;
   // Vertical: the repo node sits over the middle of the window, between the first and last column.
   const rx = vertical
     ? Math.min(

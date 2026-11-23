@@ -80,6 +80,29 @@ describe('layoutTree', () => {
     expect(last).toMatchObject({ kind: 'commit', sha: commits[9]!.sha, isHead: true });
   });
 
+  it('an expanded row keeps the canvas size after it leaves the drawn range', () => {
+    const commits = Array.from({ length: 20 }, (_, i) => ({
+      sha: i.toString(16).padStart(2, '0').repeat(20),
+      parents: i ? [(i - 1).toString(16).padStart(2, '0').repeat(20)] : [],
+      committedAt: new Date(Date.UTC(2026, 0, 1, i)).toISOString(),
+    }));
+    const s = seedSnapshot({
+      commits,
+      branches: [{ ...seedBranches[0]!, headSha: commits[19]!.sha }],
+    });
+    const graph = new TreeGraph(s.commits);
+    const name = s.branches[0]!.name;
+    const inside = layoutTree(s, graph, undefined, { expanded: new Set([name]) });
+    const outside = layoutTree(s, graph, undefined, {
+      expanded: new Set([name]),
+      range: { start: 1, end: 1 },
+    });
+    expect(outside.rows[0]!.kind === 'branch' && outside.rows[0]!.items).toEqual([]);
+    expect(outside.width).toBe(inside.width);
+    expect(outside.maxItems).toBe(inside.maxItems);
+    expect(inside.maxItems).toBeGreaterThan(MAX_SHOWN + 1);
+  });
+
   it('the chip counts commits beyond the snapshot from `ahead`', () => {
     const s = seedSnapshot({
       branches: seedBranches.map((b) => (b.name === 'dev' ? { ...b, ahead: 40 } : b)),
