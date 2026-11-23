@@ -1,7 +1,13 @@
 'use client';
 
 import type { ErrorCode } from '@app/shared/client';
-import { Maximize2, Minimize2, RefreshCw } from 'lucide-react';
+import {
+  ArrowDownFromLine,
+  ArrowRightFromLine,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import {
   useCallback,
@@ -28,6 +34,7 @@ import {
   VirtualTree,
   type SelectOptions,
   type Selection,
+  type TreeDirection,
   type Viewport,
 } from './tree-svg';
 import { TreeToolbar } from './tree-toolbar';
@@ -180,6 +187,8 @@ function TreeBody({
 }) {
   const router = useRouter();
   const { ref: screenRef, full, toggle: toggleFull } = useFullScreen<HTMLDivElement>();
+  const [direction, setDirection] = useTreeDirection();
+  const vertical = direction === 'vertical';
   const [selection, setSelection] = useState<Selection>({ type: 'repo' });
   const [view, setView] = useTreeView();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -252,16 +261,28 @@ function TreeBody({
         )}
         <Card className={full ? 'flex min-h-[70dvh] flex-col lg:min-h-0 lg:flex-1' : ''}>
           {header(
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-8"
-              onClick={toggleFull}
-              aria-label={full ? 'Exit full screen' : 'Full screen'}
-              title={full ? 'Exit full screen (Esc)' : 'Full screen'}
-            >
-              {full ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}
-            </Button>,
+            <>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8"
+                onClick={() => setDirection(vertical ? 'horizontal' : 'vertical')}
+                aria-label={vertical ? 'Show left to right' : 'Show top to bottom'}
+                title={vertical ? 'Left to right' : 'Top to bottom'}
+              >
+                {vertical ? <ArrowRightFromLine aria-hidden /> : <ArrowDownFromLine aria-hidden />}
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8"
+                onClick={toggleFull}
+                aria-label={full ? 'Exit full screen' : 'Full screen'}
+                title={full ? 'Exit full screen (Esc)' : 'Full screen'}
+              >
+                {full ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}
+              </Button>
+            </>,
           )}
           {snapshot.branches.length > 1 && (
             <TreeToolbar
@@ -281,7 +302,7 @@ function TreeBody({
               No branches match. Try another name or fewer filters.
             </p>
           ) : (
-            <VirtualTree count={rows.length} fill={full}>
+            <VirtualTree key={direction} count={rows.length} fill={full} direction={direction}>
               {(r, viewport) => (
                 <TreeLayer
                   snapshot={snapshot}
@@ -300,6 +321,7 @@ function TreeBody({
                   onToggleMerged={(p) => setMergedOpen((m) => toggled(m, p))}
                   onToggleRun={(n) => setRuns((x) => toggled(x, n))}
                   changes={changes}
+                  direction={direction}
                 />
               )}
             </VirtualTree>
@@ -323,6 +345,29 @@ function TreeBody({
       </aside>
     </div>
   );
+}
+
+const DIRECTION_KEY = 'tree-direction';
+
+/** Left to right (default) or top to bottom; remembered in this browser only. */
+function useTreeDirection(): [TreeDirection, (d: TreeDirection) => void] {
+  // TreeBody only mounts in the browser (after the tree query), so reading storage here is safe.
+  const [direction, setState] = useState<TreeDirection>(() => {
+    try {
+      return window.localStorage.getItem(DIRECTION_KEY) === 'vertical' ? 'vertical' : 'horizontal';
+    } catch {
+      return 'horizontal'; // storage blocked (private window)
+    }
+  });
+  const set = useCallback((d: TreeDirection) => {
+    setState(d);
+    try {
+      window.localStorage.setItem(DIRECTION_KEY, d);
+    } catch {
+      // not remembered; still switches for this visit
+    }
+  }, []);
+  return [direction, set];
 }
 
 /**

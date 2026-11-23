@@ -75,6 +75,31 @@ export const OVERSCAN = 4;
 /** Space above row 0's slot: row i's centre is `rowY(i) = TOP + 26 + i * RH`. */
 const PAD = G.TOP + 26 - G.RH / 2;
 
+/** Which way the tree grows: branches as rows (commits to the right) or as columns (commits down). */
+export type TreeDirection = 'horizontal' | 'vertical';
+
+/** Top-to-bottom geometry: one column per branch, the repo node above, commits below each box. */
+export const V = {
+  /** column pitch: a branch box plus a gap */
+  COL: G.BW + 24,
+  /** left padding before the first column */
+  LEFT: 24,
+  /** top of the branch boxes */
+  BY: 110,
+  /** box height */
+  BH: 58,
+  /** first commit (or chip) centre, below the box */
+  get ITEM0() {
+    return this.BY + this.BH + 40;
+  },
+  /** commit pitch down a column */
+  STEP: 56,
+} as const;
+export const colX = (i: number) => V.LEFT + i * V.COL + V.COL / 2;
+/** Height of a top-to-bottom tree whose longest column has `items` items. */
+export const verticalHeight = (items: number) => Math.max(360, V.ITEM0 + items * V.STEP + 10);
+
+/** The scroller's visible window along the list: top/height, or left/width for a vertical tree. */
 export type Viewport = { top: number; height: number };
 
 /**
@@ -84,9 +109,12 @@ export type Viewport = { top: number; height: number };
 export function VirtualTree({
   count,
   fill = false,
+  direction = 'horizontal',
   children,
 }: {
   count: number;
+  /** 'vertical' scrolls sideways through branch columns */
+  direction?: TreeDirection;
   /** grow to the parent's height (full screen) instead of stopping at VIEWPORT_MAX_H */
   fill?: boolean;
   children: (range: RowRange, viewport: Viewport) => ReactNode;
@@ -94,12 +122,14 @@ export function VirtualTree({
   const ref = useRef<HTMLDivElement>(null);
   // VERIFY: @tanstack/react-virtual v3 options (initialRect, observeElementRect, paddingStart).
   // The compiler skips memoizing this component; it re-renders on scroll by design.
+  const across = direction === 'vertical';
   // eslint-disable-next-line react-hooks/incompatible-library
   const v = useVirtualizer({
     count,
+    horizontal: across,
     getScrollElement: () => ref.current,
-    estimateSize: () => G.RH,
-    paddingStart: PAD,
+    estimateSize: () => (across ? V.COL : G.RH),
+    paddingStart: across ? V.LEFT : PAD,
     overscan: OVERSCAN,
     initialRect: FALLBACK_RECT,
     observeElementRect: (instance, cb) =>
@@ -110,7 +140,7 @@ export function VirtualTree({
   const end = (items.at(-1)?.index ?? -1) + 1;
   const viewport = {
     top: v.scrollOffset ?? 0,
-    height: v.scrollRect?.height || FALLBACK_RECT.height,
+    height: (across ? v.scrollRect?.width : v.scrollRect?.height) || FALLBACK_RECT.height,
   };
   return (
     <div
@@ -139,8 +169,10 @@ export function TreeSvg({
   onToggleRun,
   changes = NO_CHANGES,
   width,
+  direction = 'horizontal',
 }: {
   layout: TreeLayout;
+  direction?: TreeDirection;
   /** rows to draw; default all */
   range?: RowRange;
   /** the scroller's visible window: keeps the repo node in view on tall trees */
@@ -158,10 +190,20 @@ export function TreeSvg({
   /** overrides layout.width (the caller keeps it from shrinking while scrolling) */
   width?: number;
 }) {
-  const { height: H, rows } = layout;
-  const W = width ?? layout.width;
+  const vertical = direction === 'vertical';
+  const { rows } = layout;
   const { start, end } = range ?? { start: 0, end: rows.length };
   const shown = rows.slice(start, end);
+  const longest = Math.max(0, ...shown.map((r) => (r.kind === 'branch' ? r.items.length : 0)));
+  const W = vertical ? colX(rows.length - 1) + V.COL / 2 + V.LEFT : (width ?? layout.width);
+  const H = vertical ? verticalHeight(longest) : layout.height;
+  // Vertical: the repo node sits over the middle of the window, between the first and last column.
+  const rx = vertical
+    ? Math.min(
+        Math.max(viewport ? viewport.top + viewport.height / 2 : colX(0), colX(0)),
+        colX(rows.length - 1),
+      )
+    : 82;
   // The repo node sits at the middle of all rows (prototype); on a tall tree it is kept in the window.
   const ry = viewport
     ? Math.min(
@@ -222,10 +264,14 @@ export function TreeSvg({
       style={{ fontFamily: 'inherit' }}
     >
       <style>{FOCUS_CSS}</style>
-      {shown.map((r) => (
+      {shown.map((r, k) => (
         <path
           key={`edge-${r.kind === 'branch' ? r.branch.name : `merged:${r.parent}`}`}
-          d={`M150 ${ry} C175 ${ry},170 ${r.y},${G.BX} ${r.y}`}
+          d={
+            vertical
+              ? `M${rx} 70 C${rx} 92,${colX(start + k)} 88,${colX(start + k)} ${V.BY}`
+              : `M150 ${ry} C175 ${ry},170 ${r.y},${G.BX} ${r.y}`
+          }
           fill="none"
           stroke="var(--t-line)"
           strokeWidth={1.2}
@@ -237,8 +283,8 @@ export function TreeSvg({
       <g {...nodeProps({ type: 'repo' }, `Repository ${repoName}, ${layout.branchCount} branches`)}>
         <rect
           className="bt-shape"
-          x={14}
-          y={ry - 28}
+          x={vertical ? rx - 68 : 14}
+          y={vertical ? 14 : ry - 28}
           width={136}
           height={56}
           rx={10}
@@ -246,21 +292,27 @@ export function TreeSvg({
           stroke="var(--t-accent)"
           strokeWidth={repoSel ? 2 : 1.2}
         />
-        <text style={TEXT} x={82} y={ry - 6} textAnchor="middle">
+        <text style={TEXT} x={rx} y={vertical ? 36 : ry - 6} textAnchor="middle">
           {short(repoName, 16)}
         </text>
-        <text style={SUB} x={82} y={ry + 13} textAnchor="middle">
+        <text style={SUB} x={rx} y={vertical ? 55 : ry + 13} textAnchor="middle">
           {layout.branchCount} branches
         </text>
       </g>
 
-      {shown.map((r) =>
+      {shown.map((r, k) =>
         r.kind === 'merged' ? (
-          <MergedGroup key={`merged:${r.parent}`} row={r} onToggle={onToggleMerged} />
+          <g
+            key={`merged:${r.parent}`}
+            transform={vertical ? boxShift(colX(start + k), r.y) : undefined}
+          >
+            <MergedGroup row={r} onToggle={onToggleMerged} />
+          </g>
         ) : (
           <BranchRowView
             key={`row-${r.branch.name}`}
             row={r}
+            col={vertical ? colX(start + k) : null}
             isSel={isSel}
             nodeProps={nodeProps}
             rowClass={rowClass}
@@ -320,8 +372,17 @@ function MergedGroup({ row, onToggle }: { row: GroupRow; onToggle?: (parent: str
   );
 }
 
+/** Moves a row's box, drawn at (G.BX, y), to the top of the column centred on `cx` (vertical tree). */
+const boxShift = (cx: number, y: number) =>
+  `translate(${cx - G.BW / 2 - G.BX} ${V.BY + V.BH / 2 - y})`;
+
+/** Half the item's length along the row (or column): where a link line meets it. */
+const half = (it: Item, vertical: boolean) =>
+  it.kind === 'more' ? (vertical ? 11 : it.w / 2) : it.kind === 'commit' && it.isHead ? 15 : 13;
+
 function BranchRowView({
   row,
+  col,
   isSel,
   nodeProps,
   rowClass,
@@ -330,6 +391,8 @@ function BranchRowView({
   onToggleRun,
 }: {
   row: BranchRow;
+  /** vertical tree: this branch's column centre (null: a horizontal row) */
+  col: number | null;
   isSel: (s: Selection) => boolean;
   nodeProps: NodeProps;
   rowClass: (name: string) => string | undefined;
@@ -350,6 +413,11 @@ function BranchRowView({
   const cls = [rowClass(b.name), flash && 'bt-flash'].filter(Boolean).join(' ');
   // Badge left of the CI dot; the name is cut shorter to make room.
   const badgeX = G.BX + G.BW - (openPr ? 24 : 10) - BADGE_W;
+  const vertical = col !== null;
+  const shift = vertical ? boxShift(col, y) : undefined;
+  // Item centres: along the row at `it.x`, or down the column one STEP apart.
+  const at = (it: Item, k: number) =>
+    vertical ? { cx: col, cy: V.ITEM0 + k * V.STEP } : { cx: it.x, cy: y };
   return (
     <g
       data-branch={b.name}
@@ -360,7 +428,7 @@ function BranchRowView({
       data-entering={changes.entering.has(b.name) || undefined}
       data-leaving={changes.leaving.has(b.name) || undefined}
     >
-      <g {...nodeProps({ type: 'branch', name: b.name }, label)}>
+      <g {...nodeProps({ type: 'branch', name: b.name }, label)} transform={shift}>
         <rect
           className="bt-shape"
           x={G.BX}
@@ -429,6 +497,7 @@ function BranchRowView({
           )}
           aria-expanded={!row.collapsed}
           data-subtree-toggle={b.name}
+          transform={shift}
         >
           <rect
             className="bt-shape"
@@ -451,19 +520,39 @@ function BranchRowView({
         </g>
       )}
 
-      {items.length > 0 && (
-        <line
-          x1={G.BX + G.BW}
-          y1={y}
-          x2={leftEdge(items[0]!)}
-          y2={y}
-          stroke="var(--t-line)"
-          strokeWidth={1.2}
-        />
-      )}
+      {items.length > 0 &&
+        (vertical ? (
+          <line
+            x1={col}
+            y1={V.BY + V.BH}
+            x2={col}
+            y2={at(items[0]!, 0).cy - half(items[0]!, true)}
+            stroke="var(--t-line)"
+            strokeWidth={1.2}
+          />
+        ) : (
+          <line
+            x1={G.BX + G.BW}
+            y1={y}
+            x2={leftEdge(items[0]!)}
+            y2={y}
+            stroke="var(--t-line)"
+            strokeWidth={1.2}
+          />
+        ))}
       {items.map((it, k) => {
         const prev = k > 0 ? items[k - 1]! : null;
-        const link = prev ? (
+        const { cx, cy } = at(it, k);
+        const link = !prev ? null : vertical ? (
+          <line
+            x1={col}
+            y1={at(prev, k - 1).cy + half(prev, true)}
+            x2={col}
+            y2={cy - half(it, true)}
+            stroke="var(--t-line)"
+            strokeWidth={1.2}
+          />
+        ) : (
           <line
             x1={rightEdge(prev)}
             y1={y}
@@ -472,7 +561,7 @@ function BranchRowView({
             stroke="var(--t-line)"
             strokeWidth={1.2}
           />
-        ) : null;
+        );
         if (it.kind === 'more') {
           const text = moreLabel(it);
           const toggle = it.expandable ? () => onToggleRun?.(b.name) : undefined;
@@ -492,15 +581,15 @@ function BranchRowView({
               >
                 <rect
                   className="bt-shape"
-                  x={it.x - it.w / 2}
-                  y={y - 11}
+                  x={cx - it.w / 2}
+                  y={cy - 11}
                   width={it.w}
                   height={22}
                   rx={11}
                   fill="var(--t-chip)"
                   stroke="var(--border)"
                 />
-                <text style={SUB} x={it.x} y={y + 4} textAnchor="middle">
+                <text style={SUB} x={cx} y={cy + 4} textAnchor="middle">
                   {text}
                 </text>
                 {it.expanded && it.count > 0 && (
@@ -526,8 +615,8 @@ function BranchRowView({
             >
               {it.isHead && (
                 <circle
-                  cx={it.x}
-                  cy={y}
+                  cx={cx}
+                  cy={cy}
                   r={15}
                   fill="none"
                   stroke="var(--t-accent)"
@@ -537,8 +626,8 @@ function BranchRowView({
               {it.isSquash ? (
                 <rect
                   className="bt-shape"
-                  x={it.x - 10}
-                  y={y - 10}
+                  x={cx - 10}
+                  y={cy - 10}
                   width={20}
                   height={20}
                   rx={4}
@@ -549,15 +638,20 @@ function BranchRowView({
               ) : (
                 <circle
                   className="bt-shape"
-                  cx={it.x}
-                  cy={y}
+                  cx={cx}
+                  cy={cy}
                   r={10}
                   fill={it.isMerge ? 'var(--t-accent)' : 'var(--card)'}
                   stroke="var(--t-accent)"
                   strokeWidth={sw}
                 />
               )}
-              <text style={MONO} x={it.x} y={y + 30} textAnchor="middle">
+              <text
+                style={MONO}
+                x={vertical ? cx + 22 : cx}
+                y={vertical ? cy + 4 : cy + 30}
+                textAnchor={vertical ? 'start' : 'middle'}
+              >
                 {shortSha(it.sha)}
               </text>
               <title>{`${it.sha}${kind ? ` · ${kind}` : ''}`}</title>

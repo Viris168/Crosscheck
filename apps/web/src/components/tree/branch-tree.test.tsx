@@ -191,6 +191,27 @@ describe('Full screen', () => {
   });
 });
 
+describe('Direction', () => {
+  afterEach(() => window.localStorage.clear());
+
+  it('switches to top to bottom (branch columns) and back, and remembers the choice', async () => {
+    serve(tree());
+    render();
+    await screen.findByRole('group', { name: /Repository tree/ });
+    expect(branchRow('dev').getAttribute('transform')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Show top to bottom' }));
+    expect(branchRow('dev').getAttribute('transform')).toMatch(/^translate\(/);
+    expect(window.localStorage.getItem('tree-direction')).toBe('vertical');
+    cleanup();
+    render();
+    await screen.findByRole('group', { name: /Repository tree/ });
+    expect(screen.getByRole('button', { name: 'Show left to right' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Show left to right' }));
+    expect(branchRow('dev').getAttribute('transform')).toBeNull();
+    expect(window.localStorage.getItem('tree-direction')).toBe('horizontal');
+  });
+});
+
 describe('BranchTree states', () => {
   it('syncing without a snapshot: skeleton + "Cloning commits…"', async () => {
     serve(tree({ status: 'syncing', syncedAt: null }, null));
