@@ -42,17 +42,22 @@ export function IngestTokenControl({
           <KeyRound aria-hidden />
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <p>
-              Copy this token into the <code>PLATFORM_INGEST_TOKEN</code> secret now. It won&apos;t
-              be shown again.
+              Add a repository secret on GitHub now. The token won&apos;t be shown again.
             </p>
             <div className="flex flex-wrap items-center gap-2">
+              <span className="w-12 text-xs font-medium">Name</span>
+              <code className="rounded bg-white/70 px-2 py-1">PLATFORM_INGEST_TOKEN</code>
+              <CopyButton value="PLATFORM_INGEST_TOKEN" label="Copy name" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-12 text-xs font-medium">Secret</span>
               <code
                 className="min-w-0 flex-1 break-all rounded bg-white/70 px-2 py-1"
                 data-testid="ingest-token"
               >
                 {token}
               </code>
-              <CopyButton value={token} />
+              <CopyButton value={token} label="Copy secret" />
             </div>
           </div>
         </Alert>

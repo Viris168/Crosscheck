@@ -86,15 +86,19 @@ function FileTree({
     dirs.set(dir, [...(dirs.get(dir) ?? []), f]);
   }
   return (
-    <nav aria-label="Changed files" className="text-sm lg:sticky lg:top-4 lg:self-start">
+    <nav aria-label="Changed files" className="min-w-0 text-sm lg:sticky lg:top-4 lg:self-start">
       <ul className="flex flex-col gap-2">
         {[...dirs]
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([dir, fs]) => (
             <li key={dir}>
               {dir && (
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <Folder aria-hidden className="size-3.5" /> {dir}/
+                <span className="flex items-center gap-1 text-muted-foreground" title={`${dir}/`}>
+                  <Folder aria-hidden className="size-3.5 shrink-0" />
+                  {/* rtl puts the ellipsis on the left, so the deepest folders stay visible. */}
+                  <span className="min-w-0 truncate text-left [direction:rtl]">
+                    <bdi dir="ltr">{dir}/</bdi>
+                  </span>
                 </span>
               )}
               <ul className={cn('flex flex-col', dir && 'ml-4')}>
