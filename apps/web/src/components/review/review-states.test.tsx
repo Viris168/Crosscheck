@@ -36,6 +36,7 @@ const actions = (over: Partial<ReviewActions> = {}): ReviewActions => ({
   onRetry: vi.fn(),
   onCancel: vi.fn(),
   onRerun: vi.fn(),
+  onSwitch: vi.fn(),
   pending: false,
   chatgptConnected: false,
   ...over,
@@ -160,8 +161,22 @@ describe('review states', () => {
       />,
     );
     expect(screen.queryByRole('button', { name: 'Re-run' })).toBeNull();
-    expect(screen.getByText('Push a new commit to review again.')).toBeTruthy();
+    expect(screen.getByText(/Push a new commit/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Re-run with' })).toBeTruthy();
+  });
+
+  it('completed Action review: the same reviewer is offered first in Re-run with', async () => {
+    const a = actions();
+    render(
+      <ReviewState
+        review={review({ status: 'completed', provider: 'claude_action' })}
+        ctx={ctx}
+        actions={a}
+      />,
+    );
+    expect(otherProviders()).toEqual(['claude_action', 'codex_action', 'platform']);
+    await userEvent.click(screen.getByRole('button', { name: 'Re-run with' }));
+    expect(a.onRerun).toHaveBeenCalledWith('claude_action');
   });
 
   it('offers Codex (ChatGPT plan) only once ChatGPT is connected', () => {
@@ -171,6 +186,21 @@ describe('review states', () => {
     unmount();
     render(<ReviewState review={r} ctx={ctx} actions={actions({ chatgptConnected: true })} />);
     expect(otherProviders()).toContain('codex_chatgpt');
+  });
+
+  it('waiting_action: switches to another reviewer picked by mistake', async () => {
+    const a = actions();
+    render(
+      <ReviewState
+        review={review({ status: 'waiting_action', provider: 'codex_action' })}
+        ctx={ctx}
+        actions={a}
+      />,
+    );
+    expect(otherProviders()).toEqual(['claude_action', 'platform']);
+    await userEvent.click(screen.getByRole('button', { name: 'Switch reviewer' }));
+    expect(a.onSwitch).toHaveBeenCalledWith('claude_action');
+    expect(a.onRerun).not.toHaveBeenCalled();
   });
 
   it('waiting for the Action explains that a finished workflow must be re-run on GitHub', () => {

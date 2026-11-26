@@ -35,6 +35,10 @@ export function ReviewPanel({
     onRetry: () => retry.mutate(review.id, { onSuccess: (r) => onStarted?.(r.reviewId) }),
     onCancel: () => cancel.mutate(review.id),
     onRerun: (provider) => rerun.mutate(provider, { onSuccess: (r) => onStarted?.(r.reviewId) }),
+    onSwitch: (provider) =>
+      cancel.mutate(review.id, {
+        onSuccess: () => rerun.mutate(provider, { onSuccess: (r) => onStarted?.(r.reviewId) }),
+      }),
     pending: retry.isPending || rerun.isPending || cancel.isPending,
     chatgptConnected: chatgpt.data?.connected ?? false,
   };
@@ -67,7 +71,7 @@ export function ReviewState({
     case 'running':
       return <ReviewRunning review={review} ctx={ctx} />;
     case 'waiting_action':
-      return <ReviewWaitingAction review={review} ctx={ctx} />;
+      return <ReviewWaitingAction review={review} ctx={ctx} actions={actions} />;
     case 'completed':
       return <ReviewCompleted review={review} ctx={ctx} actions={actions} />;
     case 'failed':
