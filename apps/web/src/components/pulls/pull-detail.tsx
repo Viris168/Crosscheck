@@ -58,6 +58,17 @@ function PullDetailView({ data, repoId }: { data: PullDetailData; repoId: string
     return s ? `${pathname}?${s}` : pathname;
   };
 
+  // PRs first seen by the branch-tree sync come from GitHub's list call, which has no
+  // diff stats; until a pull_request webhook fills them in, count the changed files.
+  const stats =
+    pull.changedFiles === 0 && files.length > 0
+      ? {
+          additions: files.reduce((n, f) => n + f.additions, 0),
+          deletions: files.reduce((n, f) => n + f.deletions, 0),
+          changedFiles: files.length,
+        }
+      : pull;
+
   const focusFile = params.get('file');
   const focusLine = Number(params.get('line')) || undefined;
   const ctx = {
@@ -85,8 +96,8 @@ function PullDetailView({ data, repoId }: { data: PullDetailData; repoId: string
           <span className="font-mono">
             {pull.headRef} → {pull.baseRef}
           </span>
-          <DiffStat additions={pull.additions} deletions={pull.deletions} />
-          <span className="text-muted-foreground">{pull.changedFiles} files</span>
+          <DiffStat additions={stats.additions} deletions={stats.deletions} />
+          <span className="text-muted-foreground">{stats.changedFiles} files</span>
           <a
             href={pull.htmlUrl}
             target="_blank"
