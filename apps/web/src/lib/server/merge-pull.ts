@@ -29,8 +29,10 @@ export async function mergeReviewedPull(args: {
   const { repo, pull, method, userId } = args;
   if (pull.state !== 'open') throw new HttpError('conflict', 'This pull request is not open');
 
+  // Any completed review of the head is enough: a later re-run with another provider that is
+  // still waiting (or failed) is a second opinion and does not take the first one back.
   const latest = await prisma.review.findFirst({
-    where: { pullRequestId: pull.id },
+    where: { pullRequestId: pull.id, headSha: pull.headSha, status: 'completed' },
     orderBy: { createdAt: 'desc' },
     select: { id: true, status: true, headSha: true },
   });

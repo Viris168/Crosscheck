@@ -842,6 +842,17 @@ describe('POST /api/repos/:repoId/pulls/:number/merge', () => {
     });
   });
 
+  it('looks for a completed review of the head, so a pending second opinion does not block', async () => {
+    await call();
+    expect(db.review.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { pullRequestId: 'p1', headSha: 'head2', status: 'completed' },
+        orderBy: { createdAt: 'desc' },
+      }),
+    );
+    expect(gh.mergePullRequest).toHaveBeenCalled();
+  });
+
   it('defaults to a merge commit', async () => {
     await call();
     expect(gh.mergePullRequest.mock.calls[0]?.[4]).toEqual({ sha: 'head2', method: 'merge' });

@@ -107,7 +107,12 @@ function PullDetailView({ data, repoId }: { data: PullDetailData; repoId: string
             Open on GitHub <ExternalLink aria-hidden />
           </a>
           {pull.state === 'open' && (
-            <MergeControl repoId={repoId} number={pull.number} review={data.review} />
+            <MergeControl
+              repoId={repoId}
+              number={pull.number}
+              review={data.review}
+              reviews={reviews}
+            />
           )}
         </div>
       </header>
