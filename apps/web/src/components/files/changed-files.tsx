@@ -236,7 +236,8 @@ function FileDiff({
           No diff to show (binary or very large file).
         </p>
       ) : (
-        <div className="diff-dark overflow-x-auto">
+        <div className="diff-dark @container overflow-x-auto">
+          {/* A size container, so findings can match the visible width while long lines scroll. */}
           <table className="w-full border-collapse font-mono text-[13px] leading-6">
             <caption className="sr-only">Diff of {file.path}</caption>
             <tbody>
@@ -273,8 +274,9 @@ function FileDiff({
                           colSpan={3}
                           className={`diff-issue diff-issue-${worst(found)} font-sans`}
                         >
+                          {/* Pinned to the visible area (minus the 4px severity border). */}
                           <ul
-                            className="flex flex-col divide-y divide-white/10"
+                            className="sticky left-0 flex w-[calc(100cqw-4px)] flex-col divide-y divide-white/10"
                             aria-label={`Issues on line ${l.newLine}`}
                           >
                             {found.map((i) => (
