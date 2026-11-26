@@ -36,6 +36,8 @@ export interface ReviewActions {
   onRetry: () => void;
   onCancel: () => void;
   onRerun: (provider?: ProviderId) => void;
+  /** Cancels this review and starts one with `provider` (for a reviewer picked by mistake). */
+  onSwitch: (provider: ProviderId) => void;
   pending: boolean;
   /** Codex (ChatGPT plan) is only offered once the org has connected ChatGPT. */
   chatgptConnected: boolean;
@@ -99,7 +101,11 @@ export function ReviewRunning({ review }: StateProps) {
 
 // ---------------------------------------------------------------- waiting_action
 
-export function ReviewWaitingAction({ review, ctx }: StateProps) {
+export function ReviewWaitingAction({
+  review,
+  ctx,
+  actions,
+}: StateProps & { actions: ReviewActions }) {
   const keySecret =
     review.provider === 'codex_action' ? 'OPENAI_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN';
   const items = [
@@ -147,6 +153,12 @@ export function ReviewWaitingAction({ review, ctx }: StateProps) {
         >
           Open Actions tab <ExternalLink aria-hidden />
         </a>
+        <RerunWithOther
+          current={review.provider}
+          actions={actions}
+          label="Switch reviewer"
+          onRun={actions.onSwitch}
+        />
       </CardFooter>
     </Card>
   );
@@ -203,13 +215,19 @@ export function ReviewCompleted({ review, ctx, actions }: StateProps & { actions
         </CardContent>
         <CardFooter>
           {isActionProvider(review.provider) ? (
-            <p className="text-sm text-muted-foreground">Push a new commit to review again.</p>
+            <p className="text-sm text-muted-foreground">
+              Push a new commit, or re-run below and then re-run the workflow on GitHub.
+            </p>
           ) : (
             <Button onClick={() => actions.onRerun()} disabled={actions.pending}>
               <RotateCw aria-hidden /> Re-run
             </Button>
           )}
-          <RerunWithOther current={review.provider} actions={actions} />
+          <RerunWithOther
+            current={review.provider}
+            actions={actions}
+            includeCurrent={isActionProvider(review.provider)}
+          />
         </CardFooter>
       </Card>
 
@@ -279,14 +297,21 @@ function RerunWithOther({
   current,
   actions,
   label = 'Re-run with',
+  onRun = actions.onRerun,
+  includeCurrent = false,
 }: {
   current: ProviderId;
   actions: ReviewActions;
   label?: string;
+  onRun?: (provider: ProviderId) => void;
+  /** List `current` too (first, so it is the default), when the card has no plain Re-run. */
+  includeCurrent?: boolean;
 }) {
-  const others = ProviderId.filter(
-    (p) => p !== current && (p !== 'codex_chatgpt' || actions.chatgptConnected),
-  );
+  const available = (p: ProviderId) => p !== 'codex_chatgpt' || actions.chatgptConnected;
+  const others = [
+    ...(includeCurrent && available(current) ? [current] : []),
+    ...ProviderId.filter((p) => p !== current && available(p)),
+  ];
   const [provider, setProvider] = useState<ProviderId | undefined>(others[0]);
   const id = `rerun-provider-${current}`;
   if (!provider) return null;
@@ -307,11 +332,7 @@ function RerunWithOther({
           </option>
         ))}
       </Select>
-      <Button
-        variant="outline"
-        onClick={() => actions.onRerun(provider)}
-        disabled={actions.pending}
-      >
+      <Button variant="outline" onClick={() => onRun(provider)} disabled={actions.pending}>
         {label}
       </Button>
     </div>

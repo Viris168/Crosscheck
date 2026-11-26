@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { ReviewDetailSchema, type ReviewDetail } from '@app/shared/client';
+import { ReviewDetailSchema, type ReviewDetail, type ReviewSummary } from '@app/shared/client';
 import { cleanup, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderWithQuery } from '../../../test/render';
-import { MergeControl, mergeBlocker } from './merge-control';
+import { MergeControl, mergeableReview, mergeBlocker } from './merge-control';
 
 afterEach(() => {
   cleanup();
@@ -38,6 +38,31 @@ describe('mergeBlocker', () => {
     expect(mergeBlocker(review({ stale: true }))).toMatch(/latest commit/);
     expect(mergeBlocker(review({ status: 'running' }))).toMatch(/once the review completes/);
     expect(mergeBlocker(review({ status: 'failed' }))).toMatch(/once the review completes/);
+  });
+});
+
+describe('mergeBlocker with history', () => {
+  const summary = (over: Partial<ReviewSummary> = {}): ReviewSummary => ({
+    id: 'rev_0',
+    status: 'completed',
+    provider: 'claude_action',
+    headSha: 'abcdef1234567',
+    stale: false,
+    createdAt: new Date().toISOString(),
+    ...over,
+  });
+
+  it('a pending second opinion does not undo a completed review of the same commit', () => {
+    const waiting = review({ id: 'rev_2', status: 'waiting_action', provider: 'codex_action' });
+    const history = [summary({ id: 'rev_2', status: 'waiting_action' }), summary()];
+    expect(mergeBlocker(waiting, history)).toBeNull();
+    expect(mergeableReview(waiting, history)?.id).toBe('rev_0');
+  });
+
+  it('a completed review of an older commit still blocks', () => {
+    const waiting = review({ id: 'rev_2', status: 'waiting_action' });
+    const history = [summary({ id: 'rev_2', status: 'waiting_action' }), summary({ stale: true })];
+    expect(mergeBlocker(waiting, history)).toMatch(/once the review completes/);
   });
 });
 
