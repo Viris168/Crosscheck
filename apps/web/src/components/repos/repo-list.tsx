@@ -15,6 +15,14 @@ export function needsSetup(repo: Pick<RepoListItem, 'provider' | 'hasIngestToken
   return isActionProvider(repo.provider) && !repo.hasIngestToken;
 }
 
+/** Repos reviewed by a Claude/Codex Action first (whatever their last review did), then the rest. */
+export function sortRepos<T extends Pick<RepoListItem, 'provider'>>(repos: T[]): T[] {
+  return repos
+    .map((r, i) => ({ r, i, action: isActionProvider(r.provider) ? 0 : 1 }))
+    .sort((a, b) => a.action - b.action || a.i - b.i)
+    .map(({ r }) => r);
+}
+
 /**
  * `installUrl`: GitHub's install page for our App (null when unknown).
  * `canManage`: the viewer is an org owner/admin. Members only see the repos they are a GitHub
@@ -53,7 +61,7 @@ export function RepoList({
   }
   return (
     <ul className="flex flex-col divide-y rounded-xl border">
-      {data.map((r) => (
+      {sortRepos(data).map((r) => (
         <li key={r.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center">
           <Link
             href={`/repos/${r.id}/pulls`}
